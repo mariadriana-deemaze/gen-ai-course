@@ -1,38 +1,34 @@
-"""Session 1, v2: the starter agent, pointed at a Qwen model served by FreeToken.
+"""Session 1, v2: the starter agent, pointed at whichever model the .env names.
 
 The runner builds a default model string (`openai:$OPENAI_MODEL`) and hands it
 to `build_agent`. This harness ignores that argument on purpose and builds its
 own model, so `meridian/` stays untouched (see Conventions in the README).
 
-FreeToken speaks the OpenAI chat-completions protocol, so the plain
-`OpenAIProvider` works with a different `base_url`. The Qwen model profile is
-passed explicitly: `OpenAIProvider` picks its profile from the model name
-assuming OpenAI model names, and would not recognise a Qwen one.
+Which model that is comes from the environment, through the course module
+`agent_models`: a Qwen served by FreeToken, the Anthropic API, or any other
+provider PydanticAI knows. See `sessions/course-02-agentic-ai/agent_models.py`
+for the variables to set.
 
-Set in your local `.env`:
-
-    OPENAI_API_KEY=<your FreeToken key>   # the runner also checks this name
-    AGENT_BASE_URL=<FreeToken OpenAI-compatible endpoint, ending in /v1>
-    AGENT_MODEL=<the Qwen model id FreeToken exposes>
-
-The agent can read metrics per instance and find its own runbooks, 
+The agent can read metrics per instance and find its own runbooks,
 restart a single instance, and have its own "resolved" claim checked
 against the metrics before it is accepted.
 """
 
 from __future__ import annotations
 
-import os
+import sys
+from pathlib import Path
 from typing import Any, Literal
 
-from dotenv import load_dotenv
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry, RunContext
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.profiles.qwen import qwen_model_profile
-from pydantic_ai.providers.openai import OpenAIProvider
 
 from meridian.agent_runtime import IncidentDeps
+
+COURSE_DIR = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(COURSE_DIR))
+
+from agent_models import build_model  # noqa: E402
 
 INSTRUCTIONS = """\
 You are the first-line incident agent for the Meridian Exchange.
@@ -198,24 +194,9 @@ def confirm_recovery(ctx: RunContext[IncidentDeps], report: IncidentReport) -> I
 # Model -------------------------------------------------------------------
 
 
-def build_model() -> OpenAIChatModel:
-    """The Qwen model behind FreeToken's OpenAI-compatible endpoint."""
-    load_dotenv()
-    base_url = os.getenv("AGENT_BASE_URL")
-    model_name = os.getenv("AGENT_MODEL")
-    if not base_url or not model_name:
-        raise SystemExit("AGENT_BASE_URL and AGENT_MODEL are missing. Add them to your local .env.")
-    return OpenAIChatModel(
-        model_name,
-        # A local FreeToken server ignores the key, but the provider requires one.
-        provider=OpenAIProvider(base_url=base_url, api_key=os.getenv("OPENAI_API_KEY") or "freetoken-local"),
-        profile=qwen_model_profile(model_name),
-    )
-
-
 def build_agent(model: Any) -> Agent[IncidentDeps, IncidentReport]:
     # `model` comes from the runner and is deliberately unused: the model is
-    # configured here, not through OPENAI_MODEL.
+    # configured by the .env, not through OPENAI_MODEL.
     # retries=3 because a ModelRetry from _or_retry spends this budget, and the
     # default of 1 is not enough to survive a flaky backend.
     agent = Agent(build_model(), deps_type=IncidentDeps, output_type=IncidentReport, instructions=INSTRUCTIONS, retries=3)
