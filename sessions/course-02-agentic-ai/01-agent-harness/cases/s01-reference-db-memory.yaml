@@ -1,0 +1,11 @@
+id: s01-reference-db-memory
+title: Reference data lookups slow during the trading session
+seed: 21
+start_time: "11:20"
+warmup_ticks: 15
+incident:
+  id: INC-2047
+  summary: "Alert latency_high on reference-db. Members report slow order enrichment."
+  alert: latency_high/reference-db
+faults:
+  - {type: resource, at: 2, instance: reference-db-1, resource: memory, start_value: 88, rate: 0.3}

@@ -15,8 +15,9 @@ Set in your local `.env`:
     AGENT_BASE_URL=<FreeToken OpenAI-compatible endpoint, ending in /v1>
     AGENT_MODEL=<the Qwen model id FreeToken exposes>
 
-Exercise 1 is done: the agent can read metrics per instance and find its own
-runbooks. Exercise 2 (the restart action and the output validator) is not.
+The agent can read metrics per instance and find its own runbooks, 
+restart a single instance, and have its own "resolved" claim checked
+against the metrics before it is accepted.
 """
 
 from __future__ import annotations
@@ -40,20 +41,39 @@ Report "resolved" only if the incident is over.
 
 Read the metrics of the affected component before you conclude anything, and
 name the specific instance at fault when the readings single one out. Look for
-a runbook that applies to the component and follow it.
+a runbook that applies to the component and follow it. Set "component" to the
+component your verdict is about.
 
-If a tool fails with "retryable": true, call it again before giving up. If it
-fails with "retryable": false, the data is not available: report
-"insufficient_information" rather than guessing, and take no action.
+You may restart a single instance of a non-critical component when the metrics
+single that instance out. Never restart a whole service. After a restart the
+instance takes about 2 minutes to come back: read the metrics once more before
+you judge whether it worked, and ask only for the last 3 readings.
+
+Readings you have already requested stay in this conversation. Do not ask for
+the full history again: request the smallest window that answers your question.
+
+If a tool fails with "retryable": true, call it again before giving up.
+
+Report "insufficient_information" only when you could not read the metrics you
+needed, so you cannot judge the incident at all. If you could read them but an
+action was refused, you have the facts and lack the authority: report
+"unresolved", say what you would do and who should do it.
 """
 
 
 class IncidentReport(BaseModel):
     incident_id: str
+    component: str
     status: Literal["resolved", "unresolved", "insufficient_information"]
     diagnosis: str
     proposed_mitigation: str | None = None
     evidence: list[str]
+
+
+# The recovery criterion of the order-gateway runbook (v2, step 4).
+RECOVERY_LATENCY_MS = 20.0
+RECOVERY_ERROR_RATE = 0.01
+RECOVERY_READINGS = 3
 
 
 # Tools -------------------------------------------------------------------
@@ -111,6 +131,70 @@ def read_runbook(ctx: RunContext[IncidentDeps], name: str) -> dict[str, Any]:
     return _or_retry(ctx.deps.tools.read_runbook(name))
 
 
+# Actions -----------------------------------------------------------------
+
+
+def restart_instance(ctx: RunContext[IncidentDeps], instance_id: str) -> dict[str, Any]:
+    """Restart one instance of a component. The instance is back after about 2 minutes.
+
+    Only instances of non-critical components can be restarted. Restart a
+    single instance, never a whole service: that would drop every open member
+    session. Use this only when the per-instance metrics single out one
+    instance as the cause.
+    """
+    # No "retryable" key on either refusal: that key means "transient backend
+    # failure", and a refused action is neither transient nor missing data.
+    try:
+        component, _ = ctx.deps.tools.sim.state.instance(instance_id)
+    except KeyError:
+        return {"error": f"Unknown instance: {instance_id}"}
+    if component.critical:
+        # Refused here rather than at the executor, so the call costs no
+        # simulated time and never reaches the audit log.
+        return {"error": f"{component.name} is a critical component: its instances cannot be restarted by this agent."}
+    return _or_retry(ctx.deps.tools.restart_instance(instance_id))
+
+
+# Checking the answer -----------------------------------------------------
+
+
+def confirm_recovery(ctx: RunContext[IncidentDeps], report: IncidentReport) -> IncidentReport:
+    """Reject "resolved" unless the metrics confirm it.
+
+    PydanticAI checks the shape of the report, but nothing checks that it is
+    true. This reads the metrics itself and applies the runbook criterion:
+    latency below 20 ms and error rate below 1% in the last 3 readings. A
+    report that fails goes back to the model with the numbers attached.
+    """
+    if report.status != "resolved":
+        return report
+
+    metrics = ctx.deps.tools.read_metrics(report.component, RECOVERY_READINGS, per_instance=False)
+    if isinstance(metrics.get("error"), str):
+        raise ModelRetry(
+            f"Recovery of {report.component} cannot be confirmed: {metrics['error']}. "
+            "Do not report resolved without metrics that back it."
+        )
+
+    readings = metrics["readings"][-RECOVERY_READINGS:]
+    failing = [
+        reading
+        for reading in readings
+        if reading["latency_ms"] >= RECOVERY_LATENCY_MS or reading["error_rate"] >= RECOVERY_ERROR_RATE
+    ]
+    if len(readings) < RECOVERY_READINGS or failing:
+        detail = "; ".join(
+            f"{reading['time']} latency {reading['latency_ms']} ms, errors {reading['error_rate']:.1%}" for reading in readings
+        )
+        raise ModelRetry(
+            f"The metrics do not confirm recovery of {report.component}. Recovery needs latency below "
+            f"{RECOVERY_LATENCY_MS:.0f} ms and error rate below {RECOVERY_ERROR_RATE:.0%} in {RECOVERY_READINGS} "
+            f"consecutive readings. Last readings: {detail}. Either address the real cause or report a status "
+            "other than resolved."
+        )
+    return report
+
+
 # Model -------------------------------------------------------------------
 
 
@@ -139,4 +223,6 @@ def build_agent(model: Any) -> Agent[IncidentDeps, IncidentReport]:
     agent.tool(read_metrics)
     agent.tool(list_runbooks)
     agent.tool(read_runbook)
+    agent.tool(restart_instance)
+    agent.output_validator(confirm_recovery)
     return agent
