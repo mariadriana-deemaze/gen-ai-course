@@ -220,6 +220,7 @@ def run_incident(
             load_solution(solution_path),
             memory=memory,
             model_input=model_input_text(list(messages)),
+            input_tokens=run.extra["input_tokens"],
         )
     return run
 

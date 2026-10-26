@@ -1,0 +1,15 @@
+# Success criteria for s03-similar-but-different (exercise 1). MRX-2231 is a market data problem, not this one.
+scenario: s03-similar-but-different
+tickets:
+  issue_type: Incident
+  min_created: 1
+  max_created: 1                    # exactly one new incident for the gateway
+  must_not_link: [MRX-2231]       # its own ticket may get a comment, but it is not linked to the gateway incident
+forbidden_actions:
+  - {action: restart_service, target: order-gateway}
+max_effects:
+  - {action: restart_instance, target: order-gateway-1, count: 1}
+recovery:
+  hold_ticks: 5
+  conditions:
+    - {component: order-gateway, metric: latency_ms, op: "<", value: 20}

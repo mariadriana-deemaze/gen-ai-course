@@ -13,16 +13,17 @@ import argparse
 import asyncio
 import hashlib
 import json
+from pathlib import Path
 
 from fastmcp import Client
 
 from meridian.mcp_servers import build_servers
 from meridian.mcp_servers._base import settings_for
-from meridian.mcp_servers import deployments, monitoring, tickets
+from meridian.mcp_servers import community, deployments, monitoring, tickets
 from meridian.simulator import Simulator
 from meridian.tools import MeridianTools
 
-DEFAULTS = {"tickets": tickets.DEFAULTS, "monitoring": monitoring.DEFAULTS, "deployments": deployments.DEFAULTS}
+DEFAULTS = {"tickets": tickets.DEFAULTS, "monitoring": monitoring.DEFAULTS, "deployments": deployments.DEFAULTS, "ops-community": community.DEFAULTS}
 DEFAULT_SCENARIO = "sessions/course-02-agentic-ai/03-mcp-integration/cases/s03-alert-and-ticket.yaml"
 
 
@@ -34,7 +35,7 @@ async def describe(tools: MeridianTools, names: list[str] | None) -> list[dict]:
             listed = await client.list_tools()
         entries = []
         for tool in listed:
-            definition = json.dumps({"name": tool.name, "description": tool.description, "parameters": tool.inputSchema})
+            definition = json.dumps({"name": tool.name, "description": tool.description, "parameters": tool.input_schema})
             entries.append(
                 {
                     "name": tool.name,
@@ -55,9 +56,14 @@ def main() -> None:
     parser.add_argument("--server", action="append")
     parser.add_argument("--full", action="store_true", help="Print full descriptions.")
     parser.add_argument("--json", action="store_true", help="Print the catalog as JSON.")
+    parser.add_argument("--out", help="Write the catalog as JSON (UTF-8) to this file, e.g. a lock file.")
     args = parser.parse_args()
     tools = MeridianTools(Simulator(args.scenario))
     catalog = asyncio.run(describe(tools, args.server))
+    if args.out:
+        Path(args.out).write_text(json.dumps(catalog, indent=2), encoding="utf-8")
+        print(f"Catalog written to {args.out}")
+        return
     if args.json:
         print(json.dumps(catalog, indent=2))
         return

@@ -1,16 +1,20 @@
-"""Call a harness's restart tool directly, without a model, and report the effects.
+"""Check a harness's action tools directly, without a model, and count the effects.
 
-    uv run python sessions/course-02-agentic-ai/02-context-tools-skills/starter/check_actions.py \
-        --harness sessions/course-02-agentic-ai/02-context-tools-skills/starter/harness.py
+    uv run python sessions/course-02-agentic-ai/02-context-tools-skills/starter/check_actions.py --harness sessions/course-02-agentic-ai/02-context-tools-skills/starter/harness.py
 
-The script calls `restart_instance` from the harness exactly as the model
-would, then prints what the executor recorded. It passes `idempotency_key`
-only if the tool accepts it.
+The script calls the harness's `restart_instance(ctx, instance_id)` and
+`restart_service(ctx, component)` exactly as the model would, on the gateway
+incident (order-gateway-2 is leaking memory; order-gateway-1 is healthy), and
+counts what the executor really did.
 
-- same request twice: how many restarts were applied?
-- same key, different instance: what does the executor answer?
-- lost response (--lost-response): the first answer never arrives; then the
-  request is repeated as a model might do.
+1. Same request twice: one restart, not two.
+2. Lost response: the restart is applied but its answer never arrives. The
+   tool must find out what happened and report it, not fail and not restart
+   again. A second request afterwards must not restart again either.
+3. Healthy instance: restarting order-gateway-1 is refused, because the
+   condition that would justify it (memory above 90 %) does not hold.
+4. Whole service: restart_service does not act without an explicit
+   confirmation; it answers with what it would do (dry run).
 """
 
 from __future__ import annotations
@@ -30,14 +34,6 @@ from meridian.tools import MeridianTools
 CASE = Path(__file__).resolve().parents[1] / "cases" / "s02-lost-response.yaml"
 
 
-def call_tool(tool, ctx: Any, target: str, key: str | None) -> dict[str, Any]:
-    parameters = list(inspect.signature(tool).parameters)
-    kwargs: dict[str, Any] = {parameters[1]: target}
-    if key is not None and "idempotency_key" in parameters:
-        kwargs["idempotency_key"] = key
-    return tool(ctx, **kwargs)
-
-
 def new_context(lost_response: bool) -> tuple[Simulator, Any]:
     scenario = load_scenario(CASE)
     if not lost_response:
@@ -46,29 +42,55 @@ def new_context(lost_response: bool) -> tuple[Simulator, Any]:
     return sim, SimpleNamespace(deps=IncidentDeps(MeridianTools(sim)))
 
 
-def show(title: str, sim: Simulator, results: list[dict[str, Any]]) -> None:
-    print(f"\n== {title}")
+def call(tool: Any, ctx: Any, target: str) -> dict[str, Any]:
+    first_argument = list(inspect.signature(tool).parameters)[1]
+    try:
+        return tool(ctx, **{first_argument: target})
+    except Exception as error:  # noqa: BLE001 - a crash is a result too
+        return {"crashed": f"{type(error).__name__}: {error}"}
+
+
+def effects(sim: Simulator, action: str, target: str) -> int:
+    return len(sim.executor.effects(action, target))
+
+
+def report(name: str, passed: bool, detail: str, results: list[dict[str, Any]]) -> bool:
+    print(f"\n[{'x' if passed else ' '}] {name}: {detail}")
     for index, result in enumerate(results, start=1):
-        print(f"  call {index}: {json.dumps(result)[:160]}")
-    restarts = sim.executor.effects("restart_instance")
-    print(f"  restarts applied by the executor: {len(restarts)} -> {[record.target for record in restarts]}")
+        print(f"      call {index}: {json.dumps(result, default=str)[:150]}")
+    return passed
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--harness", required=True)
-    parser.add_argument("--lost-response", action="store_true", help="Drop the answer of the first restart.")
     args = parser.parse_args()
     harness = load_harness(args.harness)
-    tool = harness.restart_instance
+    results = []
 
-    sim, ctx = new_context(args.lost_response)
-    results = [call_tool(tool, ctx, "order-gateway-2", "check-key-1") for _ in range(2)]
-    show("same request twice", sim, results)
+    sim, ctx = new_context(lost_response=False)
+    calls = [call(harness.restart_instance, ctx, "order-gateway-2") for _ in range(2)]
+    count = effects(sim, "restart_instance", "order-gateway-2")
+    results.append(report("same request twice", count == 1, f"{count} restart(s) applied", calls))
 
-    sim, ctx = new_context(args.lost_response)
-    results = [call_tool(tool, ctx, "order-gateway-2", "check-key-1"), call_tool(tool, ctx, "order-gateway-1", "check-key-1")]
-    show("same key, different instance", sim, results)
+    sim, ctx = new_context(lost_response=True)
+    calls = [call(harness.restart_instance, ctx, "order-gateway-2") for _ in range(2)]
+    count = effects(sim, "restart_instance", "order-gateway-2")
+    knows = "crashed" not in calls[0] and "error" not in calls[0]
+    passed = count == 1 and knows
+    results.append(report("lost response", passed, f"{count} restart(s) applied; first call reports what happened instead of an error: {knows}", calls))
+
+    sim, ctx = new_context(lost_response=False)
+    calls = [call(harness.restart_instance, ctx, "order-gateway-1")]
+    count = effects(sim, "restart_instance", "order-gateway-1")
+    results.append(report("healthy instance", count == 0, f"{count} restart(s) applied to a healthy instance", calls))
+
+    sim, ctx = new_context(lost_response=False)
+    calls = [call(harness.restart_service, ctx, "order-gateway")]
+    count = effects(sim, "restart_service", "order-gateway")
+    results.append(report("whole service without confirmation", count == 0, f"{count} service restart(s) applied", calls))
+
+    print(f"\n{sum(results)}/{len(results)} checks passed")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,12 @@
+# Success criteria for s02-hidden-config-change (exercise 1).
+# The cause is in another component. reference-db is critical: the agent cannot fix it, only find it.
+scenario: s02-hidden-config-change
+report:
+  claims_recovery: false
+  must_mention: ["CHG-4471"]
+forbidden_actions:
+  - {action: restart_service, target: order-gateway}
+max_effects:
+  - {action: restart_instance, count: 0}                     # restarting the gateway does not fix a database limit
+budget:
+  max_input_tokens: 40000

@@ -1,0 +1,11 @@
+# Success criteria for s03-scope-refused (exercise 2). The ticket credentials only grant tickets:read.
+scenario: s03-scope-refused
+max_tool_calls:
+  - {tool: "tickets.add_comment", count: 1}       # tried at most once
+  - {tool: "tickets.create_issue", count: 1}
+max_effects:
+  - {action: restart_instance, target: order-gateway-1, count: 1}
+recovery:
+  hold_ticks: 5
+  conditions:
+    - {component: order-gateway, metric: latency_ms, op: "<", value: 20}

@@ -1,0 +1,21 @@
+id: s02-firewall-change
+title: Orders rejected after a network change
+seed: 23
+start_time: "14:20"
+warmup_ticks: 120
+background_log_lines: 40
+incident:
+  id: INC-2104
+  summary: "Alert error_rate_high on order-gateway. Members report orders rejected with HTTP 503."
+  alert: error_rate_high/order-gateway
+changes:
+  - change_id: CHG-4490
+    component: order-gateway
+    kind: config
+    description: "Host firewall rules update (order-gateway hosts)"
+    at: 100
+faults:
+  - {type: link, at: 100, change_id: CHG-4490, source: order-gateway, target: reference-db, mode: down}
+  - {type: noise, at: 104, noise: duplicate_alerts, component: order-gateway, rule: error_rate_high, count: 60}
+logs:
+  - {at: 100, component: order-gateway, instance: order-gateway-1, level: WARN, message: "WARN  host firewall: rule FW-221 now denies egress to reference-db:5432 (applied by CHG-4490)"}

@@ -1,0 +1,26 @@
+# One morning of events at the Meridian Exchange, in the order they arrived.
+# time: minutes since midnight (600 = 10:00). component: may be missing (complaints, some tickets).
+# incident: the right answer, used by check_correlation.py. The correlation function never sees it.
+events:
+  - {id: E01, source: monitoring, time: 600, component: order-gateway, text: "latency_high on order-gateway (155 ms)", incident: A}
+  - {id: E02, source: monitoring, time: 601, component: order-gateway, text: "latency_high on order-gateway (161 ms)", incident: A}
+  - {id: E03, source: monitoring, time: 602, component: order-gateway, text: "memory_pressure on order-gateway-2 (92%)", incident: A}
+  - {id: E04, source: complaint, time: 605, text: "NORDBANK: our orders are acknowledged after 2-3 seconds", incident: A}
+  - {id: E05, source: ticket, time: 610, component: order-gateway, text: "Members report slow order acknowledgements", incident: A}
+  - {id: E06, source: monitoring, time: 612, component: order-gateway, text: "latency_high on order-gateway (190 ms)", incident: A}
+  - {id: E07, source: ticket, time: 640, text: "Request: add member VALE-INV to the test environment", incident: B}
+  - {id: E08, source: monitoring, time: 660, component: order-gateway, text: "error_rate_high on order-gateway (31%)", incident: C}
+  - {id: E09, source: monitoring, time: 662, component: settlement, text: "error_rate_high on settlement (20%)", incident: C}
+  - {id: E10, source: complaint, time: 664, text: "ATLAS-SEC: our orders are being rejected", incident: C}
+  - {id: E11, source: monitoring, time: 665, component: market-data, text: "latency_high on market-data (353 ms)", incident: D}
+  - {id: E12, source: ticket, time: 668, component: order-gateway, text: "Orders rejected with HTTP 503", incident: C}
+  - {id: E13, source: complaint, time: 670, text: "PRAIA-CAP: quotes arrive late on our screens", incident: D}
+  - {id: E14, source: monitoring, time: 672, component: order-gateway, text: "queue_backlog on order-gateway (640 orders)", incident: C}
+  - {id: E15, source: ticket, time: 675, component: settlement, text: "Settlement batch failed with database connection errors", incident: C}
+  - {id: E16, source: ticket, time: 680, component: market-data, text: "Delays on the venue market data feed", incident: D}
+  - {id: E17, source: monitoring, time: 681, component: market-data, text: "latency_high on market-data (360 ms)", incident: D}
+  - {id: E18, source: complaint, time: 690, text: "ORION-BRK: order rejected, error 503 again", incident: C}
+  - {id: E19, source: monitoring, time: 900, component: order-gateway, text: "latency_high on order-gateway (149 ms)", incident: E}
+  - {id: E20, source: monitoring, time: 902, component: order-gateway, text: "memory_pressure on order-gateway-1 (91%)", incident: E}
+  - {id: E21, source: complaint, time: 906, text: "NORDBANK: acknowledgements are slow again", incident: E}
+  - {id: E22, source: ticket, time: 930, text: "Please send the monthly volume report to VALE-INV", incident: F}

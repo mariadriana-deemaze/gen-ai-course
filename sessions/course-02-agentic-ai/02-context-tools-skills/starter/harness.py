@@ -1,8 +1,12 @@
-"""Session 2 starter: the incident agent receives everything it might need.
+"""Session 2 starter: the incident agent that receives everything.
 
-This harness already reports with evidence (the result of Session 1). It puts
-every open alert, every log line and every runbook in the first message, and
-exposes two restart tools. It runs as supplied.
+The first message contains every open alert, every log line and every runbook.
+The tools hand over raw data, and the actions run every time they are called.
+It runs as supplied.
+
+Exercise 1: decide what the agent sees, and build the tools that let it find
+the rest (a log summary and a runbook finder).
+Exercise 2: build the layer that makes actions safe to repeat.
 """
 
 from __future__ import annotations
@@ -17,9 +21,9 @@ from meridian.tools import load_runbooks
 
 INSTRUCTIONS = """\
 You are the first-line incident agent for the Meridian Exchange.
-Investigate the incident, follow the applicable runbook and act when needed.
+Investigate the incident, follow the runbook that applies to the version in production, and act when needed.
 Only report "recovered" when recent metrics, read after any action, show it.
-Cite the evidence you used (metric source_ref values or log refs).
+Cite the evidence you used (metric source_ref values, log refs or change ids).
 """
 
 
@@ -32,7 +36,11 @@ class IncidentReport(BaseModel):
     summary: str
 
 
+# Context ------------------------------------------------------------------
+
+
 def build_prompt(brief: dict[str, Any], deps: IncidentDeps) -> str:
+    """The first message: everything the agent might need."""
     sim = deps.sim
     alerts = "\n".join(
         f"{alert.alert_id} {alert.opened_at} {alert.rule} {alert.component} {alert.instance or ''} {alert.state}"
@@ -49,30 +57,44 @@ def build_prompt(brief: dict[str, Any], deps: IncidentDeps) -> str:
     )
 
 
+# Investigation -------------------------------------------------------------
+
+
 def read_metrics(ctx: RunContext[IncidentDeps], component: str, window_ticks: int = 5, per_instance: bool = False) -> dict[str, Any]:
-    """Read recent metrics for a component, optionally per instance."""
+    """Recent metrics of a component, one reading per minute. per_instance=true adds each instance."""
     return ctx.deps.tools.read_metrics(component, window_ticks, per_instance)
 
 
 def read_logs(ctx: RunContext[IncidentDeps], component: str) -> dict[str, Any]:
-    """Read the logs of a component."""
+    """Every log line of a component."""
     return ctx.deps.tools.read_logs(component=component, limit=100_000)
 
 
-def restart_instance(ctx: RunContext[IncidentDeps], target: str) -> dict[str, Any]:
-    """Restart the gateway."""
-    return ctx.deps.tools.restart_instance(target)
+def recent_changes(ctx: RunContext[IncidentDeps], component: str | None = None) -> dict[str, Any]:
+    """Recent deployments and configuration changes, and whether each one is still active."""
+    return ctx.deps.tools.recent_changes(component)
 
 
-def restart_service(ctx: RunContext[IncidentDeps], target: str) -> dict[str, Any]:
-    """Restart gateway."""
-    return ctx.deps.tools.restart_service(target)
+# Actions -------------------------------------------------------------------
+
+
+def restart_instance(ctx: RunContext[IncidentDeps], instance_id: str) -> dict[str, Any]:
+    """Restart one instance, e.g. order-gateway-2."""
+    return ctx.deps.tools.restart_instance(instance_id)
+
+
+def restart_service(ctx: RunContext[IncidentDeps], component: str) -> dict[str, Any]:
+    """Restart every instance of a component."""
+    return ctx.deps.tools.restart_service(component)
+
+
+def rollback_change(ctx: RunContext[IncidentDeps], change_id: str) -> dict[str, Any]:
+    """Roll back a deployment or configuration change, e.g. CHG-4310."""
+    return ctx.deps.tools.rollback_change(change_id)
 
 
 def build_agent(model: Any) -> Agent[IncidentDeps, IncidentReport]:
     agent = Agent(model, deps_type=IncidentDeps, output_type=IncidentReport, instructions=INSTRUCTIONS)
-    agent.tool(read_metrics)
-    agent.tool(read_logs)
-    agent.tool(restart_instance)
-    agent.tool(restart_service)
+    for tool in (read_metrics, read_logs, recent_changes, restart_instance, restart_service, rollback_change):
+        agent.tool(tool)
     return agent

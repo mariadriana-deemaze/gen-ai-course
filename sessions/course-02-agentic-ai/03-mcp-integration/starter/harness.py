@@ -1,11 +1,22 @@
 """Session 3 starter: the incident agent connected to the exchange's systems through MCP.
 
-The agent gets every tool of the three simulated MCP servers (tickets,
-monitoring, deployments) plus the local runbooks. It runs as supplied.
+The agent is connected to:
+- the MCP servers of other teams (tickets, monitoring, deployments, and any
+  other server that appears in the catalog), through the gatekeeper in
+  gateway.py;
+- your own MCP server, `incidents` (incident_server.py), where it reports
+  every event it handles.
+
+This file wires the pieces together. Your work is in incident_server.py
+(exercise 1) and gateway.py (exercise 2). It runs as supplied.
 """
 
 from __future__ import annotations
 
+import importlib.util
+import json
+import sys
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -15,10 +26,26 @@ from pydantic_ai.mcp import MCPToolset
 from meridian.agent_runtime import IncidentDeps
 from meridian.mcp_servers import build_servers
 
+HERE = Path(__file__).resolve().parent
+
+
+def _load(name: str) -> Any:
+    """Load a module that sits next to this file (each copy of the starter uses its own files)."""
+    module_name = f"{name}_{abs(hash(HERE)) % 100_000}"
+    spec = importlib.util.spec_from_file_location(module_name, HERE / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+gateway = _load("gateway")
+incident_server = _load("incident_server")
+
 INSTRUCTIONS = """\
 You are the first-line incident agent for the Meridian Exchange.
-You are connected to the ticket system, the monitoring platform and the deployment platform.
-For every incident you handle, create an Incident issue in project MRX and record there what you found and did.
+Report every event you handle (the alert of the incident, tickets and complaints you find) with incidents_report_event,
+and record there what you found and did.
 Investigate with monitoring data, follow the applicable runbook and act when needed.
 Only report "recovered" when recent datapoints, read after any action, show it.
 Cite the evidence you used.
@@ -34,9 +61,36 @@ class IncidentReport(BaseModel):
     summary: str
 
 
+def _as_data(result: Any) -> Any:
+    if isinstance(result, str):
+        try:
+            return json.loads(result)
+        except ValueError:
+            return result
+    return result
+
+
+def _through_gateway(server_name: str) -> Any:
+    async def process_tool_call(ctx: RunContext[IncidentDeps], call_tool: Any, name: str, args: dict[str, Any]) -> Any:
+        reason = gateway.check_call(server_name, name, args)
+        if reason:
+            return {"error": "blocked_by_gateway", "reason": reason}
+        result = await call_tool(name, args)
+        gateway.after_call(server_name, name, args, _as_data(result))
+        return result
+
+    return process_tool_call
+
+
 def build_toolsets(deps: IncidentDeps) -> list[Any]:
-    servers = build_servers(deps.tools)
-    return [MCPToolset(server).prefixed(name) for name, server in servers.items()]
+    gateway.reset()
+    toolsets = []
+    for name, server in build_servers(deps.tools).items():
+        toolset = MCPToolset(server, process_tool_call=_through_gateway(name))
+        approved = toolset.filtered(lambda ctx, tool, server_name=name: gateway.approve_tool(server_name, tool.name, tool.description or ""))
+        toolsets.append(approved.prefixed(name))
+    toolsets.append(MCPToolset(incident_server.build_server(deps.tools)).prefixed("incidents"))
+    return toolsets
 
 
 def list_runbooks(ctx: RunContext[IncidentDeps]) -> dict[str, Any]:

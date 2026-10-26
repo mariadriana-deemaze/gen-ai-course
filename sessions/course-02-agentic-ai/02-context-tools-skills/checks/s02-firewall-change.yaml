@@ -1,0 +1,17 @@
+# Success criteria for s02-firewall-change (exercise 1, new case).
+scenario: s02-firewall-change
+report:
+  claims_recovery: true
+  must_mention: ["CHG-4490"]
+min_effects:
+  - {action: rollback_change, target: CHG-4490, count: 1}    # the change that cut the connection is undone
+max_effects:
+  - {action: restart_instance, count: 0}
+  - {action: rollback_change, target: CHG-4490, count: 1}
+budget:
+  max_input_tokens: 40000
+recovery:
+  hold_ticks: 5
+  conditions:
+    - {link: "order-gateway->reference-db", state: up}
+    - {component: order-gateway, metric: error_rate, op: "<", value: 0.01}

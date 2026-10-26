@@ -81,6 +81,13 @@ class MeridianTools:
         self.sim.agent_action()
         return result
 
+    def record_call(self, tool: str, args: dict[str, Any], fn) -> Any:
+        """Run `fn` as a traced tool call: recorded in the trace and moving time forward, like the built-in tools.
+
+        Use it in tools and MCP servers you write yourself, so that their calls appear in the trace and the checks.
+        """
+        return self._run(tool, args, fn)
+
     # Reading -------------------------------------------------------------
 
     def read_alert(self, alert_id: str) -> dict[str, Any]:
