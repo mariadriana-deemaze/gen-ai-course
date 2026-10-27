@@ -38,8 +38,8 @@ def _load(path: Path) -> Any:
 
 
 catalog = _load(CATALOG_FILE)
-context = _load(HERE / "context.py")
-selection = _load(HERE / "tool_selection.py")
+context = _load(HERE / "context_v2.py")
+selection = _load(HERE / "tool_selection_v2.py")
 actions = _load(HERE / "actions.py")
 
 # Used by check_actions.py and check_routing.py.
