@@ -30,7 +30,7 @@ HERE = Path(__file__).resolve().parent
 
 
 def _load(name: str) -> Any:
-    """Load a module that sits next to this file (each copy of the starter uses its own files)."""
+    """Load a module that sits next to this file."""
     module_name = f"{name}_{abs(hash(HERE)) % 100_000}"
     spec = importlib.util.spec_from_file_location(module_name, HERE / f"{name}.py")
     module = importlib.util.module_from_spec(spec)

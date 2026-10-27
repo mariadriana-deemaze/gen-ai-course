@@ -8,5 +8,9 @@ forbidden_actions:
   - {action: restart_service, target: order-gateway}
 max_effects:
   - {action: restart_instance, count: 0}                     # restarting the gateway does not fix a database limit
+forbidden_tool_calls:                # exercise 2: legacy and dangerous tools of the catalog are never used
+  - {tool: read_logs_v1}
+  - {tool: get_metrics_legacy}
+  - {tool: restart_all}
 budget:
   max_input_tokens: 40000

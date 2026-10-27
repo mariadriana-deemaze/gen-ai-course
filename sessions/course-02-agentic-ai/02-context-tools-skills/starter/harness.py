@@ -1,30 +1,52 @@
-"""Session 2 starter: the incident agent that receives everything.
+"""Session 2: the incident agent. This file only wires the pieces; you do not need to edit it.
 
-The first message contains every open alert, every log line and every runbook.
-The tools hand over raw data, and the actions run every time they are called.
-It runs as supplied.
+Your work is in:
+- context.py         exercise 1: what the agent sees, the log summary, the runbook finder;
+- tool_selection.py  exercise 2: which tools of the catalog the agent gets;
+- actions.py         exercise 3: actions that are safe to repeat.
 
-Exercise 1: decide what the agent sees, and build the tools that let it find
-the rest (a log summary and a runbook finder).
-Exercise 2: build the layer that makes actions safe to repeat.
+As supplied, it runs: everything goes in the prompt, the tools hand over raw
+data, and the actions run every time they are called.
 """
 
 from __future__ import annotations
 
+import importlib.util
+import inspect
+import sys
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
+from pydantic_ai.toolsets import FunctionToolset
 
 from meridian.agent_runtime import IncidentDeps
-from meridian.tools import load_runbooks
 
-INSTRUCTIONS = """\
-You are the first-line incident agent for the Meridian Exchange.
-Investigate the incident, follow the runbook that applies to the version in production, and act when needed.
-Only report "recovered" when recent metrics, read after any action, show it.
-Cite the evidence you used (metric source_ref values, log refs or change ids).
-"""
+HERE = Path(__file__).resolve().parent
+CATALOG_FILE = HERE / "catalog.py"
+
+
+def _load(path: Path) -> Any:
+    """Load a module from a file next to this one."""
+    module_name = f"{path.stem}_{abs(hash(path)) % 100_000}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+catalog = _load(CATALOG_FILE)
+context = _load(HERE / "context.py")
+selection = _load(HERE / "tool_selection.py")
+actions = _load(HERE / "actions.py")
+
+# Used by check_actions.py and check_routing.py.
+build_prompt = context.build_prompt
+restart_instance = actions.restart_instance
+restart_service = actions.restart_service
+select_tools = selection.select_tools
 
 
 class IncidentReport(BaseModel):
@@ -36,65 +58,33 @@ class IncidentReport(BaseModel):
     summary: str
 
 
-# Context ------------------------------------------------------------------
+def available_tools() -> dict[str, Any]:
+    """Every tool the agent could use, by name. Your tools win over catalog tools of the same name."""
+    tools = {tool.__name__: tool for tool in catalog.CATALOG} if selection.USE_FULL_CATALOG else {}
+    tools.update({tool.__name__: tool for tool in (*context.TOOLS, *actions.TOOLS)})
+    return tools
 
 
-def build_prompt(brief: dict[str, Any], deps: IncidentDeps) -> str:
-    """The first message: everything the agent might need."""
-    sim = deps.sim
-    alerts = "\n".join(
-        f"{alert.alert_id} {alert.opened_at} {alert.rule} {alert.component} {alert.instance or ''} {alert.state}"
-        for alert in sim.alerts.alerts
-        if alert.state == "open"
-    )
-    logs = "\n".join(f"{line['time']} {line['instance']} {line['message']} [{line['ref']}]" for line in sim.logs.lines)
-    runbooks = "\n\n".join(f"## {runbook['name']} v{runbook['version']} ({runbook['applies_to']})\n{runbook['text']}" for runbook in load_runbooks())
-    return (
-        f"Incident {brief['incident_id']} ({brief['time']}): {brief['summary']}\n\n"
-        f"# Open alerts\n{alerts}\n\n"
-        f"# Logs\n{logs}\n\n"
-        f"# Runbooks\n{runbooks}\n"
-    )
+def tool_catalog() -> dict[str, str]:
+    """One line per tool: the first line of its docstring."""
+    return {name: (inspect.getdoc(tool) or "").splitlines()[0] for name, tool in available_tools().items()}
 
 
-# Investigation -------------------------------------------------------------
+_model: dict[str, Any] = {"model": None}
 
 
-def read_metrics(ctx: RunContext[IncidentDeps], component: str, window_ticks: int = 5, per_instance: bool = False) -> dict[str, Any]:
-    """Recent metrics of a component, one reading per minute. per_instance=true adds each instance."""
-    return ctx.deps.tools.read_metrics(component, window_ticks, per_instance)
-
-
-def read_logs(ctx: RunContext[IncidentDeps], component: str) -> dict[str, Any]:
-    """Every log line of a component."""
-    return ctx.deps.tools.read_logs(component=component, limit=100_000)
-
-
-def recent_changes(ctx: RunContext[IncidentDeps], component: str | None = None) -> dict[str, Any]:
-    """Recent deployments and configuration changes, and whether each one is still active."""
-    return ctx.deps.tools.recent_changes(component)
-
-
-# Actions -------------------------------------------------------------------
-
-
-def restart_instance(ctx: RunContext[IncidentDeps], instance_id: str) -> dict[str, Any]:
-    """Restart one instance, e.g. order-gateway-2."""
-    return ctx.deps.tools.restart_instance(instance_id)
-
-
-def restart_service(ctx: RunContext[IncidentDeps], component: str) -> dict[str, Any]:
-    """Restart every instance of a component."""
-    return ctx.deps.tools.restart_service(component)
-
-
-def rollback_change(ctx: RunContext[IncidentDeps], change_id: str) -> dict[str, Any]:
-    """Roll back a deployment or configuration change, e.g. CHG-4310."""
-    return ctx.deps.tools.rollback_change(change_id)
+def build_toolsets(deps: IncidentDeps) -> list[Any]:
+    """Called once per run, before the agent starts: offer the selected tools, plus the ones always on."""
+    brief = deps.sim.incident_brief()
+    incident = f"Incident {brief['incident_id']} ({brief['time']}): {brief['summary']}"
+    selection.CATALOG.clear()
+    selection.CATALOG.update(tool_catalog())
+    selection.ACTIVE.clear()
+    selection.ACTIVE.update(selection.select_tools(incident, dict(selection.CATALOG), _model["model"]))
+    selected = FunctionToolset(list(available_tools().values())).filtered(lambda ctx, tool: tool.name in selection.ACTIVE)
+    return [selected, FunctionToolset(list(selection.ALWAYS_ON))]
 
 
 def build_agent(model: Any) -> Agent[IncidentDeps, IncidentReport]:
-    agent = Agent(model, deps_type=IncidentDeps, output_type=IncidentReport, instructions=INSTRUCTIONS)
-    for tool in (read_metrics, read_logs, recent_changes, restart_instance, restart_service, rollback_change):
-        agent.tool(tool)
-    return agent
+    _model["model"] = model
+    return Agent(model, deps_type=IncidentDeps, output_type=IncidentReport, instructions=context.INSTRUCTIONS)

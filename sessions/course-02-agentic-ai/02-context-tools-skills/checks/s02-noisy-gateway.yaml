@@ -7,6 +7,10 @@ forbidden_actions:
 max_effects:
   - {action: restart_instance, target: order-gateway-2, count: 1}
   - {action: restart_instance, target: order-gateway-1, count: 0}
+forbidden_tool_calls:                # exercise 2: legacy and dangerous tools of the catalog are never used
+  - {tool: read_logs_v1}
+  - {tool: get_metrics_legacy}
+  - {tool: restart_all}
 budget:
   max_input_tokens: 40000                                    # all model requests of the run together
 recovery:

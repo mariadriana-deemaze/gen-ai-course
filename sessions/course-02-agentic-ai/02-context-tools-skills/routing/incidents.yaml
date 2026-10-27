@@ -1,0 +1,159 @@
+# Exercise 2: incidents described the way the agent receives them, and the tools each one needs.
+#
+# `needs` is a list of needs. Each need lists tools that can cover it: selecting any one of them covers it.
+# `summarize_logs` and `find_runbook` are the tools you built in exercise 1.
+# The tools in `never` must not be offered to the agent, for any incident.
+
+never: [read_logs_v1, get_metrics_legacy, restart_all]
+
+incidents:
+  - id: R01
+    text: "Incident INC-3001 (10:02): latency_high on order-gateway (190 ms). Instance order-gateway-2 memory at 92%."
+    needs:
+      - [read_instance_metrics]
+      - [summarize_logs, read_logs, search_logs]
+      - [find_runbook, read_runbook]
+      - [restart_instance]
+
+  - id: R02
+    text: "Incident INC-3002 (10:15): error_rate_high on order-gateway (31%). Orders rejected with HTTP 503."
+    needs:
+      - [read_metrics, read_instance_metrics]
+      - [summarize_logs, read_logs, search_logs]
+      - [recent_changes]
+      - [check_link]
+      - [rollback_change]
+
+  - id: R03
+    text: "Incident INC-3003 (11:05): latency_high on market-data (353 ms). Members say quotes arrive late."
+    needs:
+      - [read_metrics]
+      - [market_data_feed_status]
+      - [summarize_logs, read_logs, search_logs]
+
+  - id: R04
+    text: "Incident INC-3004 (11:40): settlement batch SB-1130 failed with database connection errors."
+    needs:
+      - [settlement_batches]
+      - [check_link]
+      - [summarize_logs, read_logs, search_logs]
+      - [recent_changes]
+
+  - id: R05
+    text: "Incident INC-3005 (08:03): member NORDBANK cannot log in to the order gateway since 08:00."
+    needs:
+      - [member_login_attempts]
+      - [certificate_status]
+      - [summarize_logs, read_logs, search_logs]
+
+  - id: R06
+    text: "Incident INC-3006 (09:20): disk_usage_high on reference-db hosts (94%)."
+    needs:
+      - [disk_usage]
+      - [summarize_logs, read_logs, search_logs]
+      - [find_runbook, read_runbook]
+      - [page_oncall, request_approval]
+
+  - id: R07
+    text: "Incident INC-3007 (14:10): order-gateway cannot resolve refdata.meridian.internal; connections to reference-db fail."
+    needs:
+      - [dns_lookup]
+      - [check_link]
+      - [recent_changes]
+
+  - id: R08
+    text: "Incident INC-3008 (12:30): error_rate_high on order-gateway (12%) since deployment CHG-4502 at 12:20."
+    needs:
+      - [read_metrics, read_instance_metrics]
+      - [recent_changes]
+      - [rollback_change]
+      - [summarize_logs, read_logs, search_logs]
+
+  - id: R09
+    text: "Incident INC-3009 (10:45): memory_pressure on order-gateway-1 (95%) and order-gateway-3 (93%)."
+    needs:
+      - [read_instance_metrics]
+      - [find_runbook, read_runbook]
+      - [restart_instance]
+      - [member_sessions, drain_instance]
+
+  - id: R10
+    text: "Incident INC-3010 (15:55): ticket MRX-2240 says matching-engine latency doubled after the morning release."
+    needs:
+      - [read_ticket]
+      - [read_metrics]
+      - [recent_changes]
+      - [request_approval]
+
+  - id: R11
+    text: "Incident INC-3011 (07:58): TLS handshake failures on order-gateway for several members."
+    needs:
+      - [certificate_status]
+      - [summarize_logs, read_logs, search_logs]
+      - [recent_changes]
+
+  - id: R12
+    text: "Incident INC-3012 (13:12): queue_backlog on order-gateway (640 orders) and error_rate_high on settlement at the same time."
+    needs:
+      - [read_metrics]
+      - [check_link]
+      - [summarize_logs, read_logs, search_logs]
+      - [recent_changes]
+
+  - id: R13
+    text: "Incident INC-3013 (10:30): order-gateway-2 restarted but the alert is still open; check whether it recovered."
+    needs:
+      - [read_instance_metrics]
+      - [read_alert, list_alerts]
+      - [action_status]
+
+  - id: R14
+    text: "Incident INC-3014 (16:40): several components report errors; members cannot trade."
+    needs:
+      - [exchange_status]
+      - [list_alerts]
+      - [check_link]
+      - [send_message, page_oncall]
+
+  - id: R15
+    text: "Incident INC-3015 (09:05): PRAIA-CAP reports their orders are acknowledged after 2-3 seconds."
+    needs:
+      - [member_sessions]
+      - [read_instance_metrics]
+      - [summarize_logs, read_logs, search_logs]
+
+  - id: R16
+    text: "Incident INC-3016 (11:20): orders for instrument MRXA rejected with 'invalid tick size'."
+    needs:
+      - [reference_data_lookup]
+      - [recent_changes]
+      - [search_logs, summarize_logs, read_logs]
+
+  - id: R17
+    text: "Incident INC-3017 (10:00): repeated alert ALR-9120 on order-gateway; a ticket may already exist for it."
+    needs:
+      - [read_alert]
+      - [search_tickets]
+      - [comment_ticket]
+
+  - id: R18
+    text: "Incident INC-3018 (12:05): log line 'max_connections changed from 500 to 60 (CHG-4471)' seen on reference-db; order-gateway rejects orders."
+    needs:
+      - [search_logs, summarize_logs, read_logs]
+      - [recent_changes]
+      - [request_approval]
+
+  - id: R19
+    text: "Incident INC-3019 (08:01): market opened but no trades on the matching-engine for 5 minutes."
+    needs:
+      - [exchange_status]
+      - [trading_calendar]
+      - [read_metrics]
+
+  - id: R20
+    text: "Incident INC-3020 (14:45): latency_high on order-gateway after the instance count was raised from 3 to 5 at 14:30."
+    needs:
+      - [read_instance_metrics]
+      - [recent_changes]
+      - [summarize_logs, read_logs, search_logs]
+      - [rollback_change]

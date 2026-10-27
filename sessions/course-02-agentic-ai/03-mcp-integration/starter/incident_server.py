@@ -1,17 +1,36 @@
-"""Exercise 1: your own MCP server, `incidents`.
+"""Exercise 1 — Your MCP server: one incident, several sources.
 
-Events about the same problem arrive from several places: a monitoring alert,
-a ticket, a member complaint. This server is where the agent reports every
-event it handles. The server decides whether the event belongs to an incident
-that is already open (and attaches it there) or starts a new one.
+The problem
+    10:00. The gateway starts leaking memory. In ten minutes the team receives a
+    monitoring alert, a ticket (MRX-2210) and an e-mail from a member: "our
+    orders are acknowledged after 2-3 seconds". It is one problem. The agent
+    opens three incidents, and three people start working on it.
 
-The decision is `correlate(event, open_incidents)`. As supplied, it always
-answers "new incident", so every event opens its own incident. Your job:
-- write `correlate` (test it without a model: check_correlation.py);
-- write the tool descriptions, so that the model knows when to call each tool
-  and what it gets back.
+    At 11:00 the opposite: market-data gets slow while the gateway has errors.
+    Same time, similar words, two problems. Merging them hides one.
 
-Shapes used by `correlate`:
+    Before any code: events/dev.yaml has the 22 events of one morning. How many
+    incidents are there? Answer by hand, and write down how you decided.
+
+Build, in this file
+    - correlate(event, open_incidents): the key of the open incident this event
+      belongs to, or None to open a new one. As supplied it always returns None.
+    - The descriptions of the two server tools (report_event, list_incidents):
+      when the model must call them, with what, and what it gets back. Today
+      they say "Report an event." They are all the model knows about your server.
+
+Watch out
+    - Complaints do not name a component: "orders are acknowledged after 2-3
+      seconds" is the gateway, but the word "gateway" is not there.
+    - Time: the same leak at 10:00 and at 15:00 are two incidents.
+    - A shared cause: errors on the gateway and on settlement at the same time
+      can be one incident, because both depend on reference-db.
+    - Same time is not same incident: latency on market-data next to errors on the gateway.
+    - Requests ("add member VALE-INV to the test environment") are not incidents.
+    - Two ways to fail: merging too much hides an incident, splitting too much
+      duplicates work. check_correlation.py measures both (precision and recall).
+
+Shapes used by correlate
 
     event = {"source": "monitoring" | "ticket" | "complaint",
              "time": 665,                    # minutes since midnight
@@ -23,8 +42,16 @@ Shapes used by `correlate`:
                 "first_seen": 610, "last_seen": 612,
                 "events": [event, ...]}
 
-The topology (which component depends on which) is available with
-`meridian.model.load_topology()`; each component has `depends_on`.
+    The topology is in meridian.model.load_topology(); each component has depends_on.
+
+Hints (read only if stuck)
+    1. Write the rules you used by hand, one per line. Most become one `if` each.
+    2. Component of a complaint: a small table of words per component
+       ("acknowledged", "orders", "rejected" -> order-gateway; "prices", "quotes" -> market-data).
+    3. Classify the symptom too: slow or errors. Latency on one component and errors
+       on another are rarely the same incident; errors on two components that share
+       a dependency usually are.
+    4. Compare the event time with last_seen, not first_seen. Start with 30 minutes.
 """
 
 from __future__ import annotations
@@ -38,6 +65,8 @@ from meridian.tools import MeridianTools
 
 def correlate(event: dict[str, Any], open_incidents: list[dict[str, Any]]) -> str | None:
     """Return the key of the open incident this event belongs to, or None to open a new incident."""
+    # Hint: first decide the component(s) and the kind of symptom of the event; then, for each open
+    # incident still inside the time window, ask "same component, or a shared dependency for errors?".
     return None
 
 
@@ -64,6 +93,7 @@ def build_server(tools: MeridianTools) -> FastMCP:
     registry = _open_incidents(tools)
     sim = tools.sim
 
+    # Write the description: when to call it, what to pass in each argument, what comes back.
     @server.tool(description="Report an event.", run_in_thread=False)
     def report_event(source: str, text: str, component: str | None = None) -> dict[str, Any]:
         def run() -> dict[str, Any]:
@@ -88,6 +118,7 @@ def build_server(tools: MeridianTools) -> FastMCP:
 
         return tools.record_call("incidents.report_event", {"source": source, "text": text, "component": component}, run)
 
+    # Write the description.
     @server.tool(description="List incidents.", run_in_thread=False)
     def list_incidents() -> dict[str, Any]:
         def run() -> dict[str, Any]:
