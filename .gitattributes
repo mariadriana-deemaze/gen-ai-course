@@ -1,0 +1,11 @@
+# Normalise line endings so the repository stays identical across operating
+# systems: LF in the repository and in every working tree.
+* text=auto eol=lf
+
+# Keep binary and lock-adjacent files byte-exact.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.ico binary

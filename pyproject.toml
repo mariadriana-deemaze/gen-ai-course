@@ -20,6 +20,15 @@ dependencies = [
     "fastmcp-slim[server]>=4.1",
 ]
 
+[tool.uv]
+# chromadb pulls in onnxruntime, whose newest releases ship no Intel macOS
+# wheel. Requiring this environment makes the lock pick a version that does.
+required-environments = ["sys_platform == 'darwin' and platform_machine == 'x86_64'"]
+# cryptography ships no Intel macOS wheel past 48.x and building it needs Rust.
+constraint-dependencies = [
+    "cryptography<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
+
 [project.scripts]
 mrx-chaos = "meridian.cli:main"
 
