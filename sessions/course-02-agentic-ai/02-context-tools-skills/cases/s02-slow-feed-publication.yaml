@@ -1,0 +1,28 @@
+id: s02-slow-feed-publication
+title: The matching engine is slow because of a change on the feed it reads
+seed: 24
+start_time: "09:35"
+warmup_ticks: 120
+background_log_lines: 40
+incident:
+  id: INC-2105
+  summary: "Alert latency_high on matching-engine. Trades are confirmed slowly."
+  alert: latency_high/matching-engine
+changes:
+  - change_id: CHG-4518
+    component: market-data
+    kind: config
+    description: "Tune market-data publication settings"
+    at: 100
+faults:
+  # The change slows the feed. The matching engine waits for it, so the latency
+  # shows there and the cause does not: market-data's own metrics stay healthy.
+  - type: change
+    at: 100
+    change_id: CHG-4518
+    effects:
+      - {component: matching-engine, latency_ms: 220, reason: "waiting for the market-data feed"}
+  - {type: noise, at: 104, noise: duplicate_alerts, component: matching-engine, rule: latency_high, count: 150}
+logs:
+  # Seen once, in the logs of a component the alert never mentions.
+  - {at: 100, component: market-data, instance: market-data-1, level: WARN, message: "WARN  publication interval raised from 50 to 900 ms (CHG-4518); subscribers wait between ticks"}
