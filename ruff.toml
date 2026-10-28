@@ -1,0 +1,23 @@
+# Linting for this fork. Run it with `uvx ruff check .`, which needs no entry in
+# pyproject.toml: any dependency edit there forces uv to re-resolve, and this
+# project's lock cannot currently be regenerated (required-environments pins
+# Intel macOS, for which chromadb's onnxruntime ships no wheel).
+
+# Upstream's files, which carry 78 of the 82 findings a bare run reports.
+# Fixing them would diverge the fork and conflict on every pull from the
+# instructor's repo. Course 02 stays in: that is the work in progress.
+extend-exclude = [
+    "meridian",
+    "sessions/course-01-ai-fundamentals",
+    "projects/course-01-ai-fundamentals",
+]
+
+[lint]
+# Ruff's defaults, plus E402: the repo's own `# noqa: E402` comments assume it,
+# and without it Ruff reports all 15 of them as unused directives.
+extend-select = ["E402"]
+
+# SIM905 wants a list literal where a block of words is split at runtime. Its
+# fix produces one 470-character line, which `ruff format` then explodes into
+# 62. The block is the readable form, so the rule is wrong for this code.
+ignore = ["SIM905"]
