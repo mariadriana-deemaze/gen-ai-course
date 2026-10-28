@@ -1,34 +1,23 @@
-"""Session 1, v2: the starter agent, pointed at whichever model the .env names.
-
-The runner builds a default model string (`openai:$OPENAI_MODEL`) and hands it
-to `build_agent`. This harness ignores that argument on purpose and builds its
-own model, so `meridian/` stays untouched (see Conventions in the README).
-
-Which model that is comes from the environment, through the course module
-`agent_models`: a Qwen served by FreeToken, the Anthropic API, or any other
-provider PydanticAI knows. See `sessions/course-02-agentic-ai/agent_models.py`
-for the variables to set.
+"""Session 1, v2: the starter agent, with the tools and the check of this exercise.
 
 The agent can read metrics per instance and find its own runbooks,
 restart a single instance, and have its own "resolved" claim checked
 against the metrics before it is accepted.
+
+It runs on the model the runner hands it, `openai:$OPENAI_MODEL`. That reaches
+any server speaking the OpenAI chat protocol once `OPENAI_BASE_URL` is set in
+the .env, because the OpenAI client reads that variable itself. So no code here
+chooses a model, and `meridian/` stays untouched (see the README).
 """
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
 from pydantic_ai import Agent, ModelRetry, RunContext
 
 from meridian.agent_runtime import IncidentDeps
-
-COURSE_DIR = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(COURSE_DIR))
-
-from agent_models import build_model  # noqa: E402
 
 INSTRUCTIONS = """\
 You are the first-line incident agent for the Meridian Exchange.
@@ -195,11 +184,9 @@ def confirm_recovery(ctx: RunContext[IncidentDeps], report: IncidentReport) -> I
 
 
 def build_agent(model: Any) -> Agent[IncidentDeps, IncidentReport]:
-    # `model` comes from the runner and is deliberately unused: the model is
-    # configured by the .env, not through OPENAI_MODEL.
     # retries=3 because a ModelRetry from _or_retry spends this budget, and the
     # default of 1 is not enough to survive a flaky backend.
-    agent = Agent(build_model(), deps_type=IncidentDeps, output_type=IncidentReport, instructions=INSTRUCTIONS, retries=3)
+    agent = Agent(model, deps_type=IncidentDeps, output_type=IncidentReport, instructions=INSTRUCTIONS, retries=3)
     agent.tool(read_alert)
     agent.tool(read_metrics)
     agent.tool(list_runbooks)
