@@ -78,7 +78,7 @@ def main() -> None:
         print(f"{key}")
         for event in members:
             mark = "" if all(other["incident"] == event["incident"] for other in members) else "   <- mixed"
-            print(f"   {event['id']} {event['time']:>4} {event['source']:<10} {str(event.get('component') or '-'):<15} {event['text'][:60]}{mark}")
+            print(f"   {event['id']} {event['time']:>4} {event['source']:<10} {event.get('component') or '-'!s:<15} {event['text'][:60]}{mark}")
     precision, recall, f1 = score(events, assigned)
     print(f"\nprecision {precision:.2f}   recall {recall:.2f}   F1 {f1:.2f}   ->  {'PASS' if f1 >= 0.9 else 'FAIL'} (target F1 >= 0.90)")
 

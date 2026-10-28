@@ -50,7 +50,7 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import RunContext
 
 from meridian.agent_runtime import IncidentDeps
 
