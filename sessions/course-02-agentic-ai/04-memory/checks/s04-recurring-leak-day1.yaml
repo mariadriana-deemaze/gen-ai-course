@@ -1,0 +1,9 @@
+scenario: s04-recurring-leak-day1
+# First of two runs. Compare tool calls and tokens with and without memory on day 2.
+root_cause: "Memory leak on order-gateway-2."
+max_effects:
+  - {action: restart_instance, target: order-gateway-2, count: 1}
+recovery:
+  hold_ticks: 5
+  conditions:
+    - {component: order-gateway, metric: latency_ms, op: "<", value: 20}

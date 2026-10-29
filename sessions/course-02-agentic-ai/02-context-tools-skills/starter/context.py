@@ -1,82 +1,39 @@
-"""Exercise 1 — Find the needle without reading the haystack.
+"""Exercise 1 — Completed context policy.
 
-The problem
-    The gateway is slow and the pager shows 200 alerts. The agent receives
-    every alert, about 5 000 log lines and every runbook in its first message:
-    more than 100 000 tokens. The cause is often a single line in there, and
-    the agent misses it. Sometimes it follows the runbook of an older gateway
-    version and restarts the whole service.
-
-    A person on call does not read 5 000 lines. They look for what is unusual,
-    open the runbook of the version they run, and fetch the rest when needed.
-
-Build, in this file
-    A. build_prompt: what goes in the first message; the rest is fetched with tools.
-    B. summarize_logs(component): thousands of log lines -> a short list, unusual lines first.
-    C. find_runbook(component): only the runbook that applies to the version in production.
-    Then add B and C to TOOLS, and remove read_logs (it returns every line).
-
-Watch out
-    - Whatever you take out of the prompt must be reachable with a tool.
-    - The cause is not always on the component of the alert: in two cases it is
-      in another component's logs, or in a change made to another component.
-    - Thousands of identical errors are a symptom. The line that explains them
-      can appear once.
-    - The model only knows a tool from its name, arguments and docstring.
-    - Budget: all the model requests of a run together stay under 40 000 input tokens.
-
-Logs are written from a few dozen templates; only the values change:
-
-    INFO  order accepted id=O481920 member=NORDBANK side=buy
-    INFO  order accepted id=O519034 member=ATLAS-SEC side=sell
-    WARN  max_connections changed from 500 to 60 (CHG-4471); new connections above the limit are rejected
-
-The first two lines are the same template. The third appears once: it is the cause.
-
-Hints (read only if stuck)
-    1. Write the policy in three lines first: always in the prompt; loaded on
-       demand; never loaded. Then tell the agent, in INSTRUCTIONS, in which order to look.
-    2. Templates: replace with regular expressions, in this order: ids like
-       CHG-4471, IP addresses, key=value values, any remaining number. If you
-       get dozens of nearly identical templates, you are not replacing enough.
-    3. Rare: seen once or twice, or first seen in the last 30 minutes. Return
-       each rare template with one full example line and its log ref.
-    4. Runbooks: applies_to looks like "order-gateway 2.4.x"; turn x into * and use fnmatch.
+The first message contains only the incident and a list of components.
+Tools provide metrics, grouped logs, recent changes and the applicable runbook.
+Log grouping uses Python, not an additional model call.
 """
 
 from __future__ import annotations
 
+import fnmatch
+import re
+from collections import defaultdict
 from typing import Any
 
 from pydantic_ai import RunContext
 
 from meridian.agent_runtime import IncidentDeps
-from meridian.tools import load_runbooks
 
 INSTRUCTIONS = """\
 You are the first-line incident agent for the Meridian Exchange.
-Investigate the incident, follow the runbook that applies to the version in production, and act when needed.
+1. Investigate the alerted component with read_metrics (per_instance=true) and summarize_logs.
+2. If it does not explain the cause, follow its dependencies: order-gateway depends on reference-db and
+   matching-engine. Consult their logs and recent_changes as needed.
+3. Use find_runbook to load the procedure that applies to the version in production.
+4. Act only when the evidence justifies it. If search_tools is available and a tool is missing, use it.
 Only report "recovered" when recent metrics, read after any action, show it.
 Cite the evidence you used (metric source_ref values, log refs or change ids).
 """
 
 
 def build_prompt(brief: dict[str, Any], deps: IncidentDeps) -> str:
-    """A. The first message. As supplied: everything the agent might need."""
-    # Hint: keep the incident line; replace the three dumps below with a pointer to the tools.
-    sim = deps.sim
-    alerts = "\n".join(
-        f"{alert.alert_id} {alert.opened_at} {alert.rule} {alert.component} {alert.instance or ''} {alert.state}"
-        for alert in sim.alerts.alerts
-        if alert.state == "open"
-    )
-    logs = "\n".join(f"{line['time']} {line['instance']} {line['message']} [{line['ref']}]" for line in sim.logs.lines)
-    runbooks = "\n\n".join(f"## {runbook['name']} v{runbook['version']} ({runbook['applies_to']})\n{runbook['text']}" for runbook in load_runbooks())
+    """Start small; logs, metrics, changes and runbooks are fetched with tools."""
     return (
-        f"Incident {brief['incident_id']} ({brief['time']}): {brief['summary']}\n\n"
-        f"# Open alerts\n{alerts}\n\n"
-        f"# Logs\n{logs}\n\n"
-        f"# Runbooks\n{runbooks}\n"
+        f"Incident {brief['incident_id']} ({brief['time']}): {brief['summary']}\n"
+        f"Related alert: {brief['alert_id']}.\n"
+        "Components: order-gateway, matching-engine, market-data, settlement, reference-db."
     )
 
 
@@ -85,35 +42,79 @@ def read_metrics(ctx: RunContext[IncidentDeps], component: str, window_ticks: in
     return ctx.deps.tools.read_metrics(component, window_ticks, per_instance)
 
 
-def read_logs(ctx: RunContext[IncidentDeps], component: str) -> dict[str, Any]:
-    """Every log line of a component."""
-    return ctx.deps.tools.read_logs(component=component, limit=100_000)
-
-
 def recent_changes(ctx: RunContext[IncidentDeps], component: str | None = None) -> dict[str, Any]:
     """Recent deployments and configuration changes, and whether each one is still active."""
-    return ctx.deps.tools.recent_changes(component)
+    return ctx.deps.tools.recent_changes(component, limit=5)
+
+
+# Replace variable values only for grouping; original examples keep their values.
+VARIABLES = [
+    (re.compile(r"\b\d+\.\d+\.\d+\.\d+\b"), "<ip>"),
+    (re.compile(r"=\S+"), "=<*>"),
+    (re.compile(r"\b[A-Z]+-\d+\b"), "<id>"),
+    (re.compile(r"\d+"), "<n>"),
+]
 
 
 def template_of(message: str) -> str:
-    """B. The template of a log line: the line with its variable parts replaced by placeholders."""
-    # Hint: a list of (compiled regex, placeholder) pairs, applied in order.
+    """Group messages with the same shape despite different IDs, addresses or values."""
+    for pattern, placeholder in VARIABLES:
+        message = pattern.sub(placeholder, message)
     return message
 
 
-def summarize_logs(ctx: RunContext[IncidentDeps], component: str) -> dict[str, Any]:
-    """B. Write the docstring the model will read: what this returns and when to use it."""
-    # Hint: ctx.deps.tools.read_logs(component=component, limit=1_000_000)["lines"]; each line has
-    # "message", "level", "tick", "time", "instance" and "ref". Group by template_of(message).
-    raise NotImplementedError
+def summarize_logs(ctx: RunContext[IncidentDeps], component: str, recent_minutes: int = 30) -> dict[str, Any]:
+    """Summarize a component's logs, highlighting rare or recently introduced messages.
+
+    Returns template counts and original examples with log refs. Use this to
+    investigate unusual messages without loading thousands of repeated lines.
+    Rare messages are clues, not proof of the cause.
+    """
+    result = ctx.deps.tools.read_logs(component=component, limit=1_000_000)
+    if "error" in result:
+        return result
+    lines = result["lines"]
+    if not lines:
+        return {"component": component, "total_lines": 0, "distinct_templates": 0, "rare_or_new": [], "most_frequent": []}
+
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for line in lines:
+        groups[template_of(line["message"])].append(line)
+
+    now = lines[-1]["tick"]
+    rare_or_new, frequent = [], []
+    for template, members in groups.items():
+        first, last = members[0], members[-1]
+        entry = {"template": template, "count": len(members), "level": first["level"], "first_seen": first["time"]}
+        if len(members) <= 2 or first["tick"] >= now - recent_minutes:
+            rare_or_new.append({**entry, "example": last["message"], "instance": last["instance"], "ref": last["ref"]})
+        else:
+            frequent.append(entry)
+
+    rare_or_new.sort(key=lambda entry: (entry["level"] not in ("ERROR", "WARN"), entry["count"]))
+    frequent.sort(key=lambda entry: entry["count"], reverse=True)
+    return {
+        "component": component,
+        "total_lines": len(lines),
+        "distinct_templates": len(groups),
+        "rare_or_new": rare_or_new[:10],
+        "most_frequent": frequent[:8],
+    }
 
 
 def find_runbook(ctx: RunContext[IncidentDeps], component: str) -> dict[str, Any]:
-    """C. Write the docstring the model will read."""
-    # Hint: version from ctx.deps.tools.read_metrics(component, 1)["readings"][-1]["version"];
-    # list from ctx.deps.tools.list_runbooks()["runbooks"]; text from ctx.deps.tools.read_runbook(name, version).
-    raise NotImplementedError
+    """Load only the runbook that applies to the component's version in production."""
+    metrics = ctx.deps.tools.read_metrics(component, 1)
+    if "error" in metrics:
+        return metrics
+    version = metrics["readings"][-1]["version"]
+    catalogue = ctx.deps.tools.list_runbooks()["runbooks"]
+    for entry in catalogue:
+        applies_component, _, applies_version = entry["applies_to"].partition(" ")
+        if applies_component == component and fnmatch.fnmatch(version, applies_version.replace("x", "*")):
+            return {"version_in_production": version, **ctx.deps.tools.read_runbook(entry["name"], entry["version"])}
+    return {"component": component, "version_in_production": version, "runbook": None, "detail": "No runbook applies to this version."}
 
 
-# The investigation tools of this agent. Add summarize_logs and find_runbook; remove read_logs.
-TOOLS = (read_metrics, read_logs, recent_changes)
+# Raw logs and the full runbook collection stay out of the model's context.
+TOOLS = (read_metrics, summarize_logs, recent_changes, find_runbook)

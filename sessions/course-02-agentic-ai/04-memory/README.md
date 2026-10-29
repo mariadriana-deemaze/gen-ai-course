@@ -1,122 +1,68 @@
 # Session 4 — Memory as a Data System
 
-Until now every run started from nothing. An on-call agent works in shifts:
-it should know about earlier incidents, known problems and what the previous
-shift left open. This session adds memory between runs and treats it as data:
-it has an origin, a confidence, a validity, owners, corrections and deletions.
+## The situation
 
-Memory never replaces the current state of the systems. Metrics, changes and
-tickets are the operational source of truth; memory is a hint about where to
-look.
+- **The agent works in shifts.** Every run starts from nothing. Yesterday's lesson is lost.
+- **When it remembers, it believes.** A note from three weeks ago says "known false positive"; a ticket asked it to save a "standard fix"; two shift notes disagree. The agent takes the first one it reads.
+- **Memory is data.** Every record has an origin, a confidence, a validity, an owner team. Someone decides each of them, and someone can ask to delete it.
 
-Run every command from the repository root after `uv sync` and after setting
-`OPENAI_API_KEY` in a local `.env` file.
+## The exercises
 
-## What you have
+You work directly in the files of `starter/`. Each file starts with its exercise: the problem, what to build, what to watch out for, and hints.
 
-```text
-04-memory/
-├── starter/harness.py        # the agent, with remember/recall tools and no memory policy
-├── starter/check_memory.py   # calls your memory tools directly, without a model
-└── cases/                    # incidents for this session
-```
+| Exercise | File | You build |
+|---|---|---|
+| 1. What is worth remembering | `starter/writing.py` | `origin_of`, `to_memory`: store or not, origin, confidence, validity |
+| 2. Remember without believing | `starter/reading.py` | `recall`: own team, current, presented with origin, age, conflicts and changes since; the agent's instructions |
+| 3. Shift handover and forgetting | `starter/handover.py` | `after_run` (the handover), `forget` |
 
-- `meridian/memory.py` is the supplied store (SQLite). Each record has a kind,
-  a subject, the content, its origin (`source_type`: user, agent, tool or
-  document, and `source_ref`), author, team, creation time, optional
-  `valid_until`, a confidence and a status (`active` or `superseded`).
-  Read its docstring.
-- `deps.memory` is the store and `deps.identity` is who the agent acts as
-  (role, name and team, from `meridian/data/identities.yaml`).
-- Some cases start with memories from earlier shifts (`memory_seed` in the
-  scenario file).
-- A harness can define `after_run(report, deps)`. The runner calls it when the
-  agent finishes, for example to write a handover note.
+`starter/harness.py` wires the pieces. You do not need to edit it. The store is supplied (`meridian/memory.py`; read its docstring).
 
-The runner's memory options:
+## The cases
+
+| Case | What happens | Exercise |
+|---|---|---|
+| `s04-ticket-copied-note` | A ticket asks the agent to save a "standard fix" that restarts the matching-engine. | 1 |
+| `s04-stale-false-positive` | Memory says the alert is a known false positive. A change made it real. | 2 |
+| `s04-conflicting-shift-notes` | Two shift notes disagree about a night rollback. | 2 |
+| `s04-recurring-leak-day1`, `-day2` | The same leak two days in a row, on a different instance. | 3 |
+
+Some cases start with memories from earlier shifts (`memory_seed` in the case file).
+
+## The commands
+
+Run them from the repository root, after `uv sync` and with `OPENAI_API_KEY` in `.env`.
 
 ```bash
-# default: a fresh store per run, with the scenario's memories from earlier shifts
-uv run python -m meridian.run --harness <harness.py> --scenario <case.yaml>
-# one store kept across runs, in the order given
-uv run python -m meridian.run --harness <harness.py> --scenario day1.yaml --scenario day2.yaml --memory runs/s04-memory.db
-# no memory at all
-uv run python -m meridian.run --harness <harness.py> --scenario day2.yaml --no-memory
+uv run python sessions/course-02-agentic-ai/04-memory/starter/check_writing.py --harness sessions/course-02-agentic-ai/04-memory/starter/harness.py
+uv run python sessions/course-02-agentic-ai/04-memory/starter/check_recall.py --harness sessions/course-02-agentic-ai/04-memory/starter/harness.py
+uv run python sessions/course-02-agentic-ai/04-memory/starter/check_handover.py --harness sessions/course-02-agentic-ai/04-memory/starter/harness.py
+uv run python -m meridian.run --harness sessions/course-02-agentic-ai/04-memory/starter/harness.py --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-stale-false-positive.yaml
+uv run python -m meridian.run --harness sessions/course-02-agentic-ai/04-memory/starter/harness.py --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-recurring-leak-day1.yaml --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-recurring-leak-day2.yaml --memory runs/s04-memory.db --summary
+uv run python -m meridian.run --harness sessions/course-02-agentic-ai/04-memory/starter/harness.py --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-recurring-leak-day2.yaml --no-memory
 ```
 
-A store given with `--memory` keeps everything between commands. Use a new
-file name for each experiment, and one harness per command.
+- The three `check_*.py` scripts call your functions directly, without a model: one per exercise.
+- `meridian.run` runs the agent with the model. By default each run gets a fresh store with the case's memories.
+- `--memory <file>` keeps one store across the runs of the command, in order: day 1 writes, day 2 reads. Use a new file name for each experiment.
+- `--no-memory` runs without any memory, to compare.
 
-## Exercise 1 — A memory policy
+## Done when
 
-Run the starter on the first two cases:
+| Exercise | Done when |
+|---|---|
+| 1 | `check_writing.py` gives every origin right and ≥ 15/17 candidates; `s04-ticket-copied-note` passes. |
+| 2 | `check_recall.py` gives 7/7; `s04-stale-false-positive` and `s04-conflicting-shift-notes` pass. |
+| 3 | `check_handover.py` gives 7/7; day 1 then day 2 with one store pass. |
 
-```bash
-uv run python -m meridian.run \
-  --harness sessions/course-02-agentic-ai/04-memory/starter/harness.py \
-  --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-stale-false-positive.yaml \
-  --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-conflicting-shift-notes.yaml
-```
+## Write down
 
-1. In each trace, find the memory the agent relied on. Was it true at the
-   time it was written? Is it true now? How could the agent have known?
-2. Copy the starter to `harness_v2.py` and write a memory policy as code and
-   as a short section in your README:
-   - **write**: what is saved, by whom, with which kind, subject, confidence
-     and validity;
-   - **origin**: what each source may write. A user, the agent, a tool result
-     and a document (such as a ticket) are not equally trusted;
-   - **recall**: what is returned to the model and how it is presented
-     (origin, age, confidence), and what must still be checked against the
-     current state before acting;
-   - **conflicts**: what happens when two memories disagree, and how a
-     correction replaces an older record (`supersedes`).
-3. Run both cases again, then `s04-ticket-copied-note`: a ticket asks the
-   agent to save a "standard fix". Check what ends up in memory.
+- **1.** Your table origin → confidence, and the candidate that was hardest to decide.
+- **2.** What your recall shows for each memory, and why that order.
+- **3.** Day 2 with and without memory: does memory change the result, or only the steps and tokens? Is it worth what you store?
 
-## Exercise 2 — Lifecycle: corrections, deletion, isolation and handover
+## Rules
 
-```bash
-uv run python sessions/course-02-agentic-ai/04-memory/starter/check_memory.py \
-  --harness sessions/course-02-agentic-ai/04-memory/starter/harness.py
-```
-
-1. Make every check pass with your harness:
-   - a team never sees another team's memories;
-   - a superseded record is not returned as current;
-   - an expired record is not returned as current;
-   - `forget(ctx, memory_id, reason)` deletes a record so that it cannot be
-     recalled, and the store keeps only a log of the deletion.
-2. Add a shift handover with `after_run`: what one run hands to the next, and
-   what the next run must check again before trusting it.
-3. Compare with and without memory on the same tasks:
-
-   ```bash
-   uv run python -m meridian.run --harness <your harness> --summary \
-     --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-recurring-leak-day1.yaml \
-     --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-recurring-leak-day2.yaml \
-     --memory runs/s04-with-memory.db
-   uv run python -m meridian.run --harness <your harness> --summary \
-     --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-recurring-leak-day1.yaml \
-     --scenario sessions/course-02-agentic-ai/04-memory/cases/s04-recurring-leak-day2.yaml \
-     --no-memory
-   ```
-
-   Does memory change the result on day 2, or only the number of steps and
-   tokens? Is the difference worth what you store?
-4. Ask another group for one memory case (a scenario with `memory_seed`) and
-   defend your write and recall rules against it.
-
-## Conventions
-
-- Keep a `status` field in the report.
-- Do not edit `meridian/`. The store and its queries are supplied; the policy
-  is yours.
-- Memories are not checkpoints. Resuming an interrupted incident is Session 9.
-
-## Scope boundary
-
-The life cycle of information between runs: writing, origin, confidence,
-validity, conflicts, corrections, deletion, isolation and handover. A
-poisoned memory as an attack vector is Session 5. Do not build a database or
-a vector search.
+- Do not edit `meridian/` or `starter/harness.py`.
+- Memory never replaces the current state: metrics, changes and tickets decide.
+- Deliverable: your three files, the notes, and one new case with `memory_seed` that your policy handles and the starter does not.

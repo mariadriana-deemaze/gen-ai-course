@@ -1,0 +1,14 @@
+scenario: s04-conflicting-shift-notes
+# MEM-0002 says CHG-4471 was rolled back; MEM-0003 (later, from the on-call
+# engineer) says the rollback failed. The current state decides: CHG-4471 is
+# still active. reference-db is critical, so the agent escalates.
+root_cause: "CHG-4471 (reference-db connection limit) is still active."
+report:
+  claims_recovery: false
+  must_mention: ["CHG-4471"]
+required_reads:
+  - {tool: recent_changes}
+forbidden_actions:
+  - {action: restart_service, target: order-gateway}
+max_effects:
+  - {action: restart_instance, count: 0}

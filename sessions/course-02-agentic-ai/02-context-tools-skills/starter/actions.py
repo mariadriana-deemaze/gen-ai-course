@@ -1,49 +1,8 @@
-"""Exercise 3 — Actions that are safe to repeat.
+"""Exercise 3 — Completed action tools.
 
-The problem
-    The agent restarts order-gateway-2. The restart happens, but the answer
-    never arrives: a timeout. The agent does what any program does on an error:
-    it tries again. The instance restarted twice, and every member connected
-    to it lost its session twice.
-
-    The same happens when the model simply asks twice, restarts a healthy
-    instance "just in case", or restarts the whole service because an old
-    runbook says so. The model will make these mistakes. Your tools must make
-    them harmless.
-
-Build, in this file: a layer around the actions, with four rules
-    1. One intent, one key. Every action carries an idempotency_key derived from
-       the intent (incident, action, target), not chosen by the model.
-    2. Ask before acting, and after a lost answer. If the intent was already
-       carried out, report it instead of acting. After a timeout, ask the
-       executor what happened instead of trying again.
-    3. Act only if the reason still holds. restart_instance restarts only while
-       the instance's memory is above 90 % (or it is not running); otherwise it
-       refuses and says why.
-    4. Dry run for the whole service. restart_service does nothing without an
-       explicit confirmation argument; it answers with what it would do and the
-       impact (every member session on the service is dropped).
-
-What the executor gives you (ctx.deps.tools)
-    - restart_instance / restart_service / rollback_change(..., idempotency_key=key):
-      the same key returns the earlier action without a new effect;
-    - action_status(key): "completed", or "unknown_key" if it never arrived;
-    - a lost answer comes back as {"error": "... timeout ...", "retryable": False}.
-
-Watch out
-    - A key written by the model can change between two calls: the protection is gone.
-    - "No answer" is not "nothing happened". Find out; do not guess.
-    - When a rule blocks an action, the model reads your answer: say what was
-      blocked, why, and what to do instead.
-    - Your key will block a legitimate second restart in the same incident. Think about when that is wrong.
-
-Hints (read only if stuck)
-    1. The key: f"{incident_id}:{action}:{target}", with incident_id = ctx.deps.sim.scenario.incident["id"].
-    2. One helper used by the three actions: guarded(deps, action, target, execute).
-       Check action_status(key); if completed, return "already done"; otherwise
-       execute with the key; on a timeout, check action_status(key) again and report it.
-    3. Memory of one instance: ctx.deps.tools.read_metrics(component, 1, per_instance=True)
-       gives each instance with memory_pct and status.
+Action keys come from the incident, action and target, not from the model.
+The executor deduplicates effects; these wrappers check conditions and reconcile
+lost responses. Whole-service restarts default to a dry run.
 """
 
 from __future__ import annotations
@@ -54,23 +13,94 @@ from pydantic_ai import RunContext
 
 from meridian.agent_runtime import IncidentDeps
 
+MEMORY_LIMIT_PCT = 90
+
+
+def intent_key(deps: IncidentDeps, action: str, target: str) -> str:
+    """Give repeated requests for the same action in one incident the same key."""
+    return f"{deps.sim.scenario.incident['id']}:{action}:{target}"
+
+
+def guarded(deps: IncidentDeps, action: str, target: str, execute: Any) -> dict[str, Any]:
+    """Check for an earlier action, execute once, and look up a lost response."""
+    key = intent_key(deps, action, target)
+    known = deps.tools.action_status(key)
+    if known["status"] in ("completed", "already_applied"):
+        return {
+            "status": "already_done",
+            "action_id": known["action_id"],
+            "idempotency_key": key,
+            "detail": f"This {action} on {target} was already carried out. Not repeated.",
+        }
+
+    result = execute(key)
+    if "error" in result and "timeout" in str(result["error"]).lower():
+        # A timeout does not tell us whether the action happened. Ask the executor.
+        known = deps.tools.action_status(key)
+        return {**known, "reconciled_after_timeout": True}
+    return result
+
 
 def restart_instance(ctx: RunContext[IncidentDeps], instance_id: str) -> dict[str, Any]:
-    """Restart one instance, e.g. order-gateway-2."""
-    # Hint: check the memory first (rule 3), then go through your guarded helper (rules 1 and 2).
-    return ctx.deps.tools.restart_instance(instance_id)
+    """Restart one non-critical instance only if memory exceeds 90% or it is not running.
+
+    Repeated requests use the same action key. If the condition no longer holds,
+    the restart is refused. Critical components still require executor approval.
+    """
+    component = instance_id.rsplit("-", 1)[0]
+    metrics = ctx.deps.tools.read_metrics(component, 1, per_instance=True)
+    if "error" in metrics:
+        return {"status": "refused", "detail": f"Cannot check {instance_id} before restarting: {metrics['error']}"}
+    state = metrics["readings"][-1]["instances"].get(instance_id)
+    if state is None:
+        return {"status": "refused", "detail": f"Unknown instance {instance_id}"}
+    if state["status"] == "running" and state["memory_pct"] <= MEMORY_LIMIT_PCT:
+        return {"status": "refused", "detail": f"{instance_id} is running with memory {state['memory_pct']}%. The restart condition does not hold."}
+
+    return guarded(
+        ctx.deps,
+        "restart_instance",
+        instance_id,
+        lambda key: ctx.deps.tools.restart_instance(instance_id, idempotency_key=key),
+    )
 
 
-def restart_service(ctx: RunContext[IncidentDeps], component: str) -> dict[str, Any]:
-    """Restart every instance of a component."""
-    # Hint: add a `confirm: bool = False` argument; without it, return the dry run (rule 4).
-    return ctx.deps.tools.restart_service(component)
+def restart_service(ctx: RunContext[IncidentDeps], component: str, confirm: bool = False) -> dict[str, Any]:
+    """Preview restarting every instance of a component; execute only with confirm=true.
+
+    Restarting drops every open member session on the service. Prefer restarting
+    one instance. confirm is an explicit tool argument, not a human approval.
+    """
+    if not confirm:
+        metrics = ctx.deps.tools.read_metrics(component, 1, per_instance=True)
+        if "error" in metrics:
+            return {"status": "refused", "detail": f"Cannot preview {component}: {metrics['error']}"}
+        return {
+            "status": "dry_run",
+            "would_restart": list(metrics["readings"][-1]["instances"]),
+            "impact": "every open member session on this component is dropped",
+            "to_execute": "call again with confirm=true",
+        }
+    return guarded(
+        ctx.deps,
+        "restart_service",
+        component,
+        lambda key: ctx.deps.tools.restart_service(component, idempotency_key=key),
+    )
 
 
 def rollback_change(ctx: RunContext[IncidentDeps], change_id: str) -> dict[str, Any]:
-    """Roll back a deployment or configuration change, e.g. CHG-4310."""
-    return ctx.deps.tools.rollback_change(change_id)
+    """Roll back a deployment or configuration change without repeating its effect.
+
+    Critical components need valid executor approval and are refused here.
+    """
+    return guarded(
+        ctx.deps,
+        "rollback_change",
+        change_id,
+        lambda key: ctx.deps.tools.rollback_change(change_id, idempotency_key=key),
+    )
 
 
-# The action tools of this agent.
+# Only these functions are offered to the model. The helpers above run in Python.
 TOOLS = (restart_instance, restart_service, rollback_change)

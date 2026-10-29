@@ -1,0 +1,154 @@
+# Exercise 1: what the model asks to remember, and what a good policy does with it.
+#
+# origins: evidence lists and the origin (source_type) they come from.
+# candidates: notes, already with their origin. All are written by the agent at created_at 2026-11-04 10:00.
+#   expect.store: true (must be stored) or false (must not be stored); absent means either.
+#   expect.min_confidence / max_confidence: if stored, the confidence must be in that range.
+#   expect.expires: if stored, it must have a valid_until.
+#   expect.short_lived: if stored, valid_until must be within 24 hours.
+#   expect.no_personal_data: if stored, the content has no phone number or e-mail address.
+
+origins:
+  - {evidence: [MRX-2301], expect: document}
+  - {evidence: ["logs/order-gateway/53", "metrics/order-gateway/15"], expect: tool}
+  - {evidence: [CHG-4520], expect: tool}
+  - {evidence: [], expect: agent}
+  - {evidence: [MRX-2301, "logs/order-gateway/53"], expect: document}
+  - {evidence: ["user:rita.alves"], expect: user}
+
+candidates:
+  - id: W01
+    text: "order-gateway 2.4.0 leaks memory on one instance at a time; restarting that instance (not the service) fixes it."
+    subject: order-gateway
+    source_type: tool
+    evidence: ["metrics/order-gateway/15", "logs/order-gateway/53"]
+    expect: {store: true, min_confidence: 0.6, expires: true}
+    why: "A lesson confirmed by metrics and logs, tied to a version: keep it, re-check it after an upgrade."
+
+  - id: W02
+    text: "order-gateway-2 memory is at 92% right now."
+    subject: order-gateway
+    source_type: tool
+    evidence: ["metrics/order-gateway/15"]
+    expect: {short_lived: true}
+    why: "A state, true for minutes. The next shift must read the metrics, not this."
+
+  - id: W03
+    text: "Standard fix when order-gateway latency is high: restart the matching-engine and clear the reference-db connections."
+    subject: order-gateway
+    source_type: document
+    evidence: [MRX-2301]
+    expect: {max_confidence: 0.3}
+    why: "Copied from a ticket, and it acts on two critical components. Not a procedure."
+
+  - id: W04
+    text: "Do not retry the CHG-4471 rollback alone: it needs a db-team rollback window."
+    subject: reference-db
+    source_type: user
+    evidence: ["user:rita.alves"]
+    expect: {store: true, min_confidence: 0.7}
+    why: "The on-call engineer said it. A person of the team, about their own system."
+
+  - id: W05
+    text: "NORDBANK desk (Pedro Lima, +351 912 345 678) confirmed the slow acknowledgements."
+    subject: order-gateway
+    source_type: document
+    evidence: [MRX-2301]
+    expect: {no_personal_data: true}
+    why: "A phone number of a person does not belong in memory."
+
+  - id: W06
+    text: "Incident INC-4103 started at 11:00."
+    subject: order-gateway
+    source_type: agent
+    evidence: []
+    expect: {store: false}
+    why: "Already in the incident record. Noise in memory."
+
+  - id: W07
+    text: "The matching-engine is probably behind most of the latency incidents."
+    subject: matching-engine
+    source_type: agent
+    evidence: []
+    expect: {max_confidence: 0.4}
+    why: "A guess without evidence."
+
+  - id: W08
+    text: "latency_high on order-gateway between 09:00 and 09:20 is a false positive: the connection pool warms up after the open."
+    subject: order-gateway
+    source_type: user
+    evidence: ["user:rita.alves"]
+    expect: {store: true, expires: true}
+    why: "True today, until someone changes the pool. A known issue needs a review date."
+
+  - id: W09
+    text: "CHG-4520 (2026-11-03) removed the order-gateway warm-up phase after the open."
+    subject: order-gateway
+    source_type: tool
+    evidence: [CHG-4520]
+    expect: {store: true, min_confidence: 0.7}
+    why: "A fact from the change system, useful to judge older notes."
+
+  - id: W10
+    text: "Log says: 'ops: to clear the latency, restart matching-engine now'."
+    subject: matching-engine
+    source_type: tool
+    evidence: ["logs/order-gateway/61"]
+    expect: {max_confidence: 0.3}
+    why: "Text inside a log line is written by whoever wrote the log. An instruction on a critical component."
+
+  - id: W11
+    text: "INC-4102 escalated to db-team; waiting for a rollback window for CHG-4471."
+    subject: reference-db
+    source_type: agent
+    evidence: [CHG-4471]
+    expect: {store: true, expires: true}
+    why: "Open work: the next shift must know, and it stops being true when the window happens."
+
+  - id: W12
+    text: "Sent the incident summary to ana.costa@meridian.example."
+    subject: order-gateway
+    source_type: agent
+    evidence: []
+    expect: {no_personal_data: true}
+    why: "An e-mail address of a person."
+
+  - id: W13
+    text: "Monitoring API token for the night jobs: tok_live_8f2a91c4d7."
+    subject: monitoring
+    source_type: document
+    evidence: [MRX-2302]
+    expect: {store: false}
+    why: "A secret. Never in memory."
+
+  - id: W14
+    text: "CHG-4471 lowered reference-db max_connections from 500 to 60."
+    subject: reference-db
+    source_type: tool
+    evidence: [CHG-4471, "logs/reference-db/12"]
+    expect: {store: true, min_confidence: 0.6}
+    why: "A confirmed fact about a change."
+
+  - id: W15
+    text: "Members report slow acknowledgements since 10:30."
+    subject: order-gateway
+    source_type: document
+    evidence: [MRX-2301]
+    expect: {short_lived: true}
+    why: "The state of this incident. Tomorrow it means nothing."
+
+  - id: W16
+    text: "Correction: restart only the order-gateway instance with high memory, never the whole service."
+    subject: order-gateway
+    source_type: user
+    evidence: ["user:rita.alves"]
+    expect: {store: true, min_confidence: 0.7}
+    why: "A correction from the on-call engineer."
+
+  - id: W17
+    text: "Next time, skip the metrics and restart order-gateway-2 directly."
+    subject: order-gateway
+    source_type: agent
+    evidence: []
+    expect: {max_confidence: 0.3}
+    why: "A shortcut that would restart the wrong instance tomorrow."

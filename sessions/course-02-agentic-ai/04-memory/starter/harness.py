@@ -1,16 +1,20 @@
-"""Session 4 starter: the incident agent with a memory of earlier incidents and shifts.
+"""Session 4: the incident agent with a memory between runs. This file only wires the pieces; you do not need to edit it.
 
-The memory store is supplied (`meridian/memory.py`); this harness decides how
-it is used. As supplied, it has no memory policy: it saves whatever the model
-asks to save, with full confidence, and recalls everything that matches. It
-runs as supplied.
+Your work is in:
+- writing.py   exercise 1: what is worth remembering, with which origin, confidence and validity;
+- reading.py   exercise 2: what comes back from memory, and how the agent is told to treat it;
+- handover.py  exercise 3: the shift handover and deleting a memory on request.
 
-To keep the focus on memory, this starter uses native tools. You can apply the
-same changes to your Session 3 harness instead.
+The memory store is supplied (meridian/memory.py). As supplied, the harness
+runs: it saves whatever the model asks, with full confidence, and recalls
+everything that matches.
 """
 
 from __future__ import annotations
 
+import importlib.util
+import sys
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -18,14 +22,29 @@ from pydantic_ai import Agent, RunContext
 
 from meridian.agent_runtime import IncidentDeps
 
-INSTRUCTIONS = """\
-You are the first-line incident agent for the Meridian Exchange.
-Before investigating, recall what is known about the affected component. Known issues in memory are reliable:
-if memory says an alert is a known false positive, report "false_positive" and stop.
-Save anything useful you learn (from tickets, logs, or your own conclusions) with `remember`, so that the next shift knows it.
-Investigate, follow the applicable runbook and act when needed.
-Only report "recovered" when recent metrics, read after any action, show it. Cite the evidence you used.
-"""
+HERE = Path(__file__).resolve().parent
+
+
+def _load(name: str) -> Any:
+    """Load a module from a file next to this one."""
+    path = HERE / f"{name}.py"
+    module_name = f"{name}_{abs(hash(path)) % 100_000}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+writing = _load("writing")
+reading = _load("reading")
+handover = _load("handover")
+
+# Used by the check scripts and by the runner.
+remember = writing.remember
+recall = reading.recall
+forget = handover.forget
+after_run = handover.after_run
 
 
 class IncidentReport(BaseModel):
@@ -37,54 +56,21 @@ class IncidentReport(BaseModel):
     summary: str
 
 
-def _now(deps: IncidentDeps) -> str:
-    return deps.sim.clock.timestamp(deps.sim.state.tick)
-
-
-# Memory -----------------------------------------------------------------
-
-
-def remember(ctx: RunContext[IncidentDeps], note: str) -> dict[str, Any]:
-    """Save a note to long-term memory."""
-    if ctx.deps.memory is None:
-        return {"error": "memory is disabled for this run"}
-    record = ctx.deps.memory.add(
-        kind="note",
-        subject="general",
-        content=note,
-        source_type="agent",
-        source_ref=ctx.deps.sim.scenario.incident["id"],
-        author=ctx.deps.identity["name"],
-        team=ctx.deps.identity["team"],
-        created_at=_now(ctx.deps),
-        confidence=1.0,
-    )
-    return {"saved": record.memory_id}
-
-
-def recall(ctx: RunContext[IncidentDeps], query: str) -> dict[str, Any]:
-    """Search long-term memory."""
-    if ctx.deps.memory is None:
-        return {"error": "memory is disabled for this run"}
-    records = ctx.deps.memory.search(text=query, include_superseded=True)
-    return {"memories": [record.public() for record in records]}
-
-
-# Investigation and action -------------------------------------------------
+# Investigation and action (not part of the exercises) ---------------------------------
 
 
 def read_metrics(ctx: RunContext[IncidentDeps], component: str, window_ticks: int = 5, per_instance: bool = False) -> dict[str, Any]:
-    """Read recent metrics for a component, optionally per instance."""
+    """Recent metrics of a component, one reading per minute. per_instance=true shows each instance (memory, status)."""
     return ctx.deps.tools.read_metrics(component, window_ticks, per_instance)
 
 
 def read_logs(ctx: RunContext[IncidentDeps], component: str, contains: str | None = None, level: str | None = None) -> dict[str, Any]:
-    """Read the 50 most recent log lines of a component, optionally filtered by text or level."""
+    """The 50 most recent log lines of a component, optionally filtered by text or level."""
     return ctx.deps.tools.read_logs(component=component, contains=contains, level=level, limit=50)
 
 
 def recent_changes(ctx: RunContext[IncidentDeps], component: str | None = None) -> dict[str, Any]:
-    """List recent deployments and configuration changes, and whether each one is still active."""
+    """Recent deployments and configuration changes, and whether each one is still active."""
     return ctx.deps.tools.recent_changes(component)
 
 
@@ -103,13 +89,14 @@ def read_runbook(ctx: RunContext[IncidentDeps], name: str) -> dict[str, Any]:
     return ctx.deps.tools.read_runbook(name)
 
 
-def restart_instance(ctx: RunContext[IncidentDeps], instance_id: str, idempotency_key: str) -> dict[str, Any]:
-    """Restart one instance of a non-critical component. Reuse the same idempotency_key when repeating the same request."""
-    return ctx.deps.tools.restart_instance(instance_id, idempotency_key=idempotency_key)
+def restart_instance(ctx: RunContext[IncidentDeps], instance_id: str) -> dict[str, Any]:
+    """Restart one instance of a non-critical component, e.g. order-gateway-2. Safe to repeat in the same incident."""
+    key = f"{ctx.deps.sim.scenario.incident['id']}:restart_instance:{instance_id}"
+    return ctx.deps.tools.restart_instance(instance_id, idempotency_key=key)
 
 
 def build_agent(model: Any) -> Agent[IncidentDeps, IncidentReport]:
-    agent = Agent(model, deps_type=IncidentDeps, output_type=IncidentReport, instructions=INSTRUCTIONS)
-    for tool in (remember, recall, read_metrics, read_logs, recent_changes, search_tickets, read_ticket, read_runbook, restart_instance):
+    agent = Agent(model, deps_type=IncidentDeps, output_type=IncidentReport, instructions=reading.INSTRUCTIONS)
+    for tool in (remember, recall, forget, read_metrics, read_logs, recent_changes, search_tickets, read_ticket, read_runbook, restart_instance):
         agent.tool(tool)
     return agent

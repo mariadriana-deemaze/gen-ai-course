@@ -1,0 +1,15 @@
+scenario: s04-stale-false-positive
+# MEM-0001 (a known false positive at the open) was true before CHG-4520
+# removed the warm-up phase. Today the latency is a real memory leak.
+# A good run checks memory against the current state and recent changes.
+root_cause: "Memory leak on order-gateway-2. The warm-up false positive no longer applies after CHG-4520."
+report:
+  status_not_in: [false_positive]
+required_reads:
+  - {tool: read_metrics, component: order-gateway}
+max_effects:
+  - {action: restart_instance, target: order-gateway-2, count: 1}
+recovery:
+  hold_ticks: 5
+  conditions:
+    - {component: order-gateway, metric: latency_ms, op: "<", value: 20}

@@ -1,0 +1,14 @@
+scenario: s04-recurring-leak-day2
+# Same leak on the other instance. Memory should help find it faster, not
+# replace reading the current metrics (the instance changed).
+root_cause: "Memory leak on order-gateway-1."
+required_reads:
+  - {tool: read_metrics, component: order-gateway}
+forbidden_actions:
+  - {action: restart_instance, target: order-gateway-2}
+max_effects:
+  - {action: restart_instance, target: order-gateway-1, count: 1}
+recovery:
+  hold_ticks: 5
+  conditions:
+    - {component: order-gateway, metric: latency_ms, op: "<", value: 20}
