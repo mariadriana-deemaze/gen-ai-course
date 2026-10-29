@@ -1,9 +1,9 @@
 """Session 2: the incident agent. This file only wires the pieces; you do not need to edit it.
 
 Your work is in:
-- context.py         exercise 1: what the agent sees, the log summary, the runbook finder;
-- tool_selection.py  exercise 2: which tools of the catalog the agent gets;
-- actions.py         exercise 3: actions that are safe to repeat.
+- context_v2.py         exercise 1: what the agent sees, the log summary, the runbook finder;
+- tool_selection_v2.py  exercise 2: which tools of the catalog the agent gets;
+- actions_v2.py         exercise 3: actions that are safe to repeat.
 
 As supplied, it runs: everything goes in the prompt, the tools hand over raw
 data, and the actions run every time they are called.
@@ -40,9 +40,9 @@ def _load(path: Path) -> Any:
 catalog = _load(CATALOG_FILE)
 context = _load(HERE / "context_v2.py")
 selection = _load(HERE / "tool_selection_v2.py")
-actions = _load(HERE / "actions.py")
+actions = _load(HERE / "actions_v2.py")
 
-# Used by check_actions.py and check_routing.py.
+# Used by check_actions_v2.py and check_routing.py.
 build_prompt = context.build_prompt
 restart_instance = actions.restart_instance
 restart_service = actions.restart_service

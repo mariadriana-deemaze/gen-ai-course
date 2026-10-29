@@ -123,4 +123,20 @@ The two gates are in tension, and every configuration tried falls on one side:
 
 ## Exercise 3 — repeatable actions
 
-Not started.
+### 3. Why a model-chosen key is weaker than an intent-derived one
+
+A model-chosen key is unstable. The same intent can produce different strings
+across calls: `"INC-2103:restart:order-gateway-2"` vs `"restart-order-gateway-2"`.
+The executor treats each as distinct, so the guard is bypassed and the restart
+happens again. A derived key — `f"{incident_id}:{action}:{target}"` — is
+deterministic, computed from structured data, not the model's wording.
+
+But "one intent, one key" is not always right. A legitimate second restart in
+the same incident gets silently blocked. Example: at tick 10, memory is 88 %,
+restart is applied, key is `INC-2103:restart_instance:order-gateway-2`. Memory
+drops. At tick 30, a new fault injects memory at 0.5 %/tick, it climbs past 90
+%, and the agent correctly restarts again — but the key is identical, so the
+guard returns `"already_applied"`. Fix: extend the key with a condition snapshot,
+e.g. `f"{incident_id}:{action}:{target}:{memory_pct_floor}"`, so a restart at 90
+% produces a different key from one at 95 %. Or allow a new action after a time
+threshold since the last one.
