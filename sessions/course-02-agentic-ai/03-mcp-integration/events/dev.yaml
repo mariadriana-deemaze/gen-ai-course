@@ -24,3 +24,10 @@ events:
   - {id: E20, source: monitoring, time: 902, component: order-gateway, text: "memory_pressure on order-gateway-1 (91%)", incident: E}
   - {id: E21, source: complaint, time: 906, text: "NORDBANK: acknowledgements are slow again", incident: E}
   - {id: E22, source: ticket, time: 930, text: "Please send the monthly volume report to VALE-INV", incident: F}
+  # Five events added for the deliverable. A naive rule ("same component within 30 minutes")
+  # gets four of them wrong: E24 and E25 it splits off, E26 and E27 it swallows.
+  - {id: E23, source: monitoring, time: 960, component: settlement, text: "error_rate_high on settlement (18%)", incident: G}
+  - {id: E24, source: monitoring, time: 963, component: order-gateway, text: "error_rate_high on order-gateway (24%)", incident: G}
+  - {id: E25, source: complaint, time: 966, text: "VALE-INV: our orders are failing with 503", incident: G}
+  - {id: E26, source: ticket, time: 975, component: order-gateway, text: "Request: add member ORION-BRK to the gateway test environment", incident: H}
+  - {id: E27, source: monitoring, time: 985, component: order-gateway, text: "latency_high on order-gateway (210 ms)", incident: I}
